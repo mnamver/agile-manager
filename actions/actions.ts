@@ -402,6 +402,13 @@ export async function getLatestReport(projectId: number): Promise<AiReport | nul
   ) ?? null;
 }
 
+export type HealthComponent = {
+  label: string;
+  score: number;   // actual score earned
+  max: number;     // max possible
+  detail: string;  // one-line explanation
+};
+
 export type SprintMetrics = {
   totalIssues: number;
   byStatus: { status: string; count: number; points: number }[];
@@ -412,6 +419,9 @@ export type SprintMetrics = {
   completionRate: number;
   byAssignee: { name: string; total: number; done: number; points: number; donePoints: number }[];
   byPriority: { priority: string; count: number; doneCount: number }[];
+  healthScore: number;
+  healthLabel: 'Mükemmel' | 'İyi' | 'Orta' | 'Zayıf';
+  healthComponents: HealthComponent[];
 };
 
 export async function getSprintMetrics(projectId: number): Promise<SprintMetrics> {
@@ -449,8 +459,79 @@ export async function getSprintMetrics(projectId: number): Promise<SprintMetrics
     priorityMap.set(prio, p);
   }
 
+  // ── Health Score (0-100) ──────────────────────────────────────────────────
+  const n = issues.length;
+
+  // 1. SP Completion (0-40): done SP / planned SP
+  const c1max = 40;
+  const c1raw = plannedSP > 0 ? (doneSP / plannedSP) * c1max : c1max * 0.5;
+  const c1 = Math.round(c1raw);
+
+  // 2. Momentum (0-25): (done + 0.5 * inProgress) / planned — work moving
+  const c2max = 25;
+  const c2raw = plannedSP > 0 ? ((doneSP + inProgressSP * 0.5) / plannedSP) * c2max : c2max * 0.5;
+  const c2 = Math.min(c2max, Math.round(c2raw));
+
+  // 3. Priority Handling (0-20): critical+high done / critical+high total
+  const c3max = 20;
+  const critHigh = [...priorityMap.entries()]
+    .filter(([p]) => p === 'Critical' || p === 'High')
+    .reduce((acc, [, v]) => ({ total: acc.total + v.count, done: acc.done + v.doneCount }), { total: 0, done: 0 });
+  const c3raw = critHigh.total > 0 ? (critHigh.done / critHigh.total) * c3max : c3max;
+  const c3 = Math.round(c3raw);
+
+  // 4. Team Balance (0-15): penalise when one person carries all load
+  const c4max = 15;
+  const loads = [...assigneeMap.values()].map(a => a.total);
+  let c4 = c4max;
+  if (loads.length > 1) {
+    const avg = loads.reduce((a, b) => a + b, 0) / loads.length;
+    const maxL = Math.max(...loads);
+    const imbalance = avg > 0 ? (maxL / avg - 1) : 0; // 0 = perfect, higher = worse
+    c4 = Math.max(0, Math.round(c4max * (1 - Math.min(imbalance / 2, 1))));
+  } else if (n === 0) {
+    c4 = 0;
+  }
+
+  const healthScore = Math.min(100, Math.max(1, c1 + c2 + c3 + c4));
+  const healthLabel: SprintMetrics['healthLabel'] =
+    healthScore >= 80 ? 'Mükemmel' :
+    healthScore >= 60 ? 'İyi' :
+    healthScore >= 40 ? 'Orta' : 'Zayıf';
+
+  const healthComponents: HealthComponent[] = [
+    {
+      label: 'SP Tamamlanma',
+      score: c1, max: c1max,
+      detail: plannedSP > 0
+        ? `${doneSP} / ${plannedSP} SP tamamlandı (%${Math.round((doneSP/plannedSP)*100)})`
+        : 'SP tahmin edilmemiş',
+    },
+    {
+      label: 'İlerleme Momentumu',
+      score: c2, max: c2max,
+      detail: plannedSP > 0
+        ? `${doneSP} done + ${inProgressSP} in-progress SP`
+        : 'Henüz iş başlamadı',
+    },
+    {
+      label: 'Öncelik Yönetimi',
+      score: c3, max: c3max,
+      detail: critHigh.total > 0
+        ? `Critical/High: ${critHigh.done} / ${critHigh.total} kapatıldı`
+        : 'Critical/High issue yok',
+    },
+    {
+      label: 'Ekip Dengesi',
+      score: c4, max: c4max,
+      detail: loads.length > 1
+        ? `${loads.length} kişi, maks yük: ${Math.max(...loads)} issue`
+        : loads.length === 1 ? 'Tek kişi sprint' : 'Ekip atanmamış',
+    },
+  ];
+
   return {
-    totalIssues: issues.length,
+    totalIssues: n,
     byStatus: [...statusMap.entries()].map(([status, v]) => ({ status, ...v })).sort((a, b) => b.count - a.count),
     plannedSP,
     doneSP,
@@ -459,6 +540,9 @@ export async function getSprintMetrics(projectId: number): Promise<SprintMetrics
     completionRate: plannedSP > 0 ? Math.round((doneSP / plannedSP) * 100) : 0,
     byAssignee: [...assigneeMap.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.total - a.total),
     byPriority: [...priorityMap.entries()].map(([priority, v]) => ({ priority, ...v })),
+    healthScore,
+    healthLabel,
+    healthComponents,
   };
 }
 

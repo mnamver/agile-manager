@@ -1294,8 +1294,68 @@ function ReportTabView({
   const completionRate = metrics?.completionRate ?? 0;
   const rateColor = completionRate >= 70 ? 'text-emerald-400' : completionRate >= 40 ? 'text-amber-400' : 'text-red-400';
 
+  const hs = metrics?.healthScore ?? 0;
+  const hsColor   = hs >= 80 ? '#10b981' : hs >= 60 ? '#f59e0b' : hs >= 40 ? '#f97316' : '#ef4444';
+  const hsBg      = hs >= 80 ? 'border-emerald-500/40 bg-emerald-500/5' : hs >= 60 ? 'border-amber-500/40 bg-amber-500/5' : hs >= 40 ? 'border-orange-500/40 bg-orange-500/5' : 'border-red-500/40 bg-red-500/5';
+  const hsTextCol = hs >= 80 ? 'text-emerald-400' : hs >= 60 ? 'text-amber-400' : hs >= 40 ? 'text-orange-400' : 'text-red-400';
+
   return (
     <div className="flex-1 overflow-y-auto p-5 space-y-5">
+
+      {/* ── Sprint Health Score ────────────────────────────────────── */}
+      {metrics && (
+        <div className={`border rounded-2xl p-5 ${hsBg}`}>
+          <div className="flex items-center gap-6">
+
+            {/* Gauge ring */}
+            <div className="relative shrink-0" style={{ width: 96, height: 96 }}>
+              <svg width="96" height="96" viewBox="0 0 96 96">
+                {/* Track */}
+                <circle cx="48" cy="48" r="40" fill="none" stroke="#1e3a5f" strokeWidth="10" />
+                {/* Arc */}
+                <circle
+                  cx="48" cy="48" r="40" fill="none"
+                  stroke={hsColor} strokeWidth="10"
+                  strokeDasharray={`${(hs / 100) * 251.2} 251.2`}
+                  strokeLinecap="round"
+                  transform="rotate(-90 48 48)"
+                  style={{ transition: 'stroke-dasharray 0.6s ease' }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className={`text-2xl font-black leading-none ${hsTextCol}`}>{hs}</span>
+                <span className="text-[9px] text-blue-500 mt-0.5">/ 100</span>
+              </div>
+            </div>
+
+            {/* Label + components */}
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`text-lg font-bold ${hsTextCol}`}>{metrics.healthLabel}</span>
+                <span className="text-xs text-blue-500">Sprint Sağlık Skoru</span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                {metrics.healthComponents.map(c => {
+                  const pct = c.max > 0 ? (c.score / c.max) * 100 : 0;
+                  const barCol = pct >= 80 ? 'bg-emerald-500' : pct >= 55 ? 'bg-amber-500' : pct >= 35 ? 'bg-orange-500' : 'bg-red-500';
+                  return (
+                    <div key={c.label}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-xs text-blue-300">{c.label}</span>
+                        <span className="text-xs font-semibold text-white">{c.score}<span className="text-blue-600">/{c.max}</span></span>
+                      </div>
+                      <div className="h-1.5 bg-blue-950 rounded-full overflow-hidden mb-0.5">
+                        <div className={`h-full rounded-full ${barCol} transition-all`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className="text-[10px] text-blue-600 leading-tight">{c.detail}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── KPI Cards ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-4 gap-3">
@@ -1325,7 +1385,7 @@ function ReportTabView({
             <div className="flex items-center gap-4 text-xs text-blue-400">
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Done ({doneSP} SP)</span>
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" /> Devam ({inProgressSP} SP)</span>
-              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-600 inline-block" /> Bekliyor ({metrics?.remaining} SP)</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-600 inline-block" /> Devam ediyor ({metrics?.remaining} SP)</span>
             </div>
           </div>
           <div className="h-5 rounded-full overflow-hidden flex bg-slate-800">
@@ -1604,7 +1664,7 @@ function SprintPlanView({
             ✓ {withDate} tarihli
           </span>
           <span className="text-xs px-2.5 py-1 rounded-full bg-slate-500/15 text-slate-400 border border-slate-500/25">
-            — {withoutDate} bekliyor
+            — {withoutDate} devam ediyor
           </span>
           <span className="text-xs text-blue-500">{tasks.length} toplam</span>
         </div>
@@ -1643,20 +1703,10 @@ function SprintPlanView({
             onChange={e => setOnlyDated(e.target.checked)}
             className="accent-emerald-400"
           />
-          <span className="text-xs text-blue-300">Sadece tarihli</span>
+          <span className="text-xs text-blue-300">Sadece tamamlanan</span>
         </label>
 
         <span className="text-xs text-blue-600">{filtered.length} gösterilen</span>
-
-        <button
-          onClick={onReimport}
-          className="ml-auto text-xs px-3 py-1.5 border border-blue-700/50 hover:border-amber-400/50 text-blue-400 hover:text-amber-400 rounded-lg transition-all flex items-center gap-1.5"
-        >
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-          </svg>
-          Yenile
-        </button>
       </div>
 
       {/* Table */}
