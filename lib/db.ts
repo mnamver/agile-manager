@@ -102,6 +102,9 @@ function initSchema(db: Database.Database) {
       sprint_bitis         TEXT,
       tamamlanma_tarihi    TEXT,
       blok_nedeni          TEXT,
+      ict_buyukluk         TEXT,
+      ict_sp               INTEGER,
+      description          TEXT,
       imported_at          TEXT    DEFAULT (datetime('now'))
     );
   `);
@@ -114,6 +117,15 @@ function initSchema(db: Database.Database) {
   const sprintTaskCols = (db.prepare(`PRAGMA table_info(sprint_tasks)`).all() as {name:string}[]).map(c=>c.name);
   if (!sprintTaskCols.includes('blok_nedeni')) {
     db.exec(`ALTER TABLE sprint_tasks ADD COLUMN blok_nedeni TEXT`);
+  }
+  if (!sprintTaskCols.includes('ict_buyukluk')) {
+    db.exec(`ALTER TABLE sprint_tasks ADD COLUMN ict_buyukluk TEXT`);
+  }
+  if (!sprintTaskCols.includes('ict_sp')) {
+    db.exec(`ALTER TABLE sprint_tasks ADD COLUMN ict_sp INTEGER`);
+  }
+  if (!sprintTaskCols.includes('description')) {
+    db.exec(`ALTER TABLE sprint_tasks ADD COLUMN description TEXT`);
   }
 
   const issueCols = (db.prepare(`PRAGMA table_info(jira_issues_cache)`).all() as {name:string}[]).map(c=>c.name);
@@ -389,5 +401,8 @@ export type SprintTask = {
   sprint_bitis: string | null;
   tamamlanma_tarihi: string | null;
   blok_nedeni: string | null;
+  ict_buyukluk: string | null;
+  ict_sp: number | null;
+  description: string | null;
   imported_at: string;
 };

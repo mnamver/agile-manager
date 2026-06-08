@@ -20,6 +20,8 @@ import {
   estimateBacklogItem,
   getSprintTasks,
   importSprintTasksFromJson,
+  enrichSprintTasksFromJira,
+  assignRandomIctToSprintTasks,
   getBlokCozumOnerisi,
   getJiraIssues,
 } from '@/actions/actions';
@@ -191,6 +193,11 @@ export default function ProjectDetail({
       let tasks = await getSprintTasks(project.id);
       if (tasks.length === 0) {
         await importSprintTasksFromJson(project.id);
+        tasks = await getSprintTasks(project.id);
+      }
+      // Assign random ICT sizes if missing
+      if (tasks.length > 0 && tasks.every(t => t.ict_buyukluk === null)) {
+        await assignRandomIctToSprintTasks(project.id);
         tasks = await getSprintTasks(project.id);
       }
       setSprintTasks(tasks);
@@ -1720,6 +1727,7 @@ function SprintPlanView({
               <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-28">Sprint Başlangıç</th>
               <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-28">Sprint Bitiş</th>
               <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-32">Tamamlanma Tarihi</th>
+              <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-px whitespace-nowrap">ICT Büyüklük</th>
               <th className="text-left px-2 py-2.5 text-blue-400 font-medium w-px whitespace-nowrap">Blok Nedeni</th>
             </tr>
           </thead>
@@ -1776,6 +1784,24 @@ function SprintPlanView({
                       <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
                         Devam ediyor
                       </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2.5 text-center w-px whitespace-nowrap">
+                    {task.ict_sp != null ? (
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium border whitespace-nowrap ${
+                          task.ict_sp <= 2
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            : task.ict_sp <= 5
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                            : 'bg-red-500/20 text-red-300 border-red-500/30'
+                        }`}
+                        title={task.ict_buyukluk ?? undefined}
+                      >
+                        {task.ict_buyukluk} · {task.ict_sp} SP
+                      </span>
+                    ) : (
+                      <span className="text-blue-800 text-xs">—</span>
                     )}
                   </td>
                   <td className="px-2 py-2.5 w-px whitespace-nowrap">

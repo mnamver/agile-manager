@@ -1,5 +1,75 @@
+import https from 'https';
+
 const JIRA_BASE_URL = process.env.JIRA_BASE_URL ?? 'https://jira.turkcell.com.tr';
 const JIRA_TOKEN = process.env.JIRA_TOKEN ?? '';
+
+const ICT_SIZE_MAP: Record<string, number> = {
+  XS: 1, S: 2, M: 3, L: 5, XL: 8, XXL: 13,
+};
+
+function httpsGet(url: string, headers: Record<string, string>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const options: https.RequestOptions = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || '443',
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: 'GET',
+      headers,
+      rejectUnauthorized: false,
+    };
+    const req = https.request(options, res => {
+      let data = '';
+      res.on('data', (chunk: Buffer) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
+        } else {
+          resolve(data);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+export type SprintTaskFields = {
+  key: string;
+  ictBuyukluk: string | null;
+  ictSp: number | null;
+  description: string | null;
+};
+
+export async function fetchSprintTaskFields(keys: string[]): Promise<SprintTaskFields[]> {
+  if (!JIRA_TOKEN || keys.length === 0) return [];
+
+  const BATCH = 50;
+  const results: SprintTaskFields[] = [];
+
+  for (let i = 0; i < keys.length; i += BATCH) {
+    const batch = keys.slice(i, i + BATCH);
+    const jql = encodeURIComponent(`key in (${batch.map(k => `"${k}"`).join(',')})`);
+    const url = `${JIRA_BASE_URL}/rest/api/2/search?jql=${jql}&maxResults=${BATCH}&fields=customfield_28725,description`;
+
+    const raw = await httpsGet(url, {
+      Authorization: `Bearer ${JIRA_TOKEN}`,
+      Accept: 'application/json',
+    });
+    const data = JSON.parse(raw) as { issues?: { key: string; fields: Record<string, unknown> }[] };
+
+    for (const issue of data.issues ?? []) {
+      const rawSize = issue.fields?.customfield_28725;
+      const ictBuyukluk = typeof rawSize === 'string' ? rawSize.trim() : null;
+      const ictSp = ictBuyukluk ? (ICT_SIZE_MAP[ictBuyukluk] ?? null) : null;
+      const descRaw = issue.fields?.description;
+      const description = typeof descRaw === 'string' && descRaw.trim() ? descRaw.trim().slice(0, 2000) : null;
+      results.push({ key: issue.key, ictBuyukluk, ictSp, description });
+    }
+  }
+
+  return results;
+}
 
 export type JiraIssueRaw = {
   key: string;

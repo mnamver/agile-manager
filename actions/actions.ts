@@ -19,6 +19,7 @@ import {
   fetchBoardBacklog,
   normalizeBacklogIssues,
   getMockBacklog,
+  fetchSprintTaskFields,
   type BacklogItem,
 } from '@/lib/jira';
 
@@ -312,7 +313,12 @@ export async function estimateIssuePoints(
   const issue = db.prepare('SELECT * FROM jira_issues_cache WHERE id = ?').get(issueId) as JiraIssue;
   if (!issue) throw new Error('Issue bulunamadı');
 
-  const result = await estimateStoryPoints(issue.summary, '', undefined);
+  const sprintTask = db
+    .prepare('SELECT description FROM sprint_tasks WHERE project_id = ? AND no = ? LIMIT 1')
+    .get(projectId, issue.jira_id) as { description: string | null } | undefined;
+  const description = sprintTask?.description ?? '';
+
+  const result = await estimateStoryPoints(issue.summary, description, undefined);
 
   db.prepare('UPDATE jira_issues_cache SET story_points = ? WHERE id = ?').run(result.points, issueId);
   revalidatePath(`/projects/${projectId}`);
@@ -326,9 +332,16 @@ export async function estimateAllIssuePoints(projectId: number): Promise<void> {
     .prepare('SELECT * FROM jira_issues_cache WHERE project_id = ?')
     .all(projectId) as JiraIssue[];
 
+  const descMap = new Map<string, string>();
+  const sprintTasks = db
+    .prepare('SELECT no, description FROM sprint_tasks WHERE project_id = ? AND description IS NOT NULL')
+    .all(projectId) as { no: string; description: string }[];
+  for (const st of sprintTasks) descMap.set(st.no, st.description);
+
   for (const issue of issues) {
     try {
-      const result = await estimateStoryPoints(issue.summary, '', undefined);
+      const description = descMap.get(issue.jira_id) ?? '';
+      const result = await estimateStoryPoints(issue.summary, description, undefined);
       db.prepare('UPDATE jira_issues_cache SET story_points = ? WHERE id = ?').run(result.points, issue.id);
     } catch {
       // skip failed estimates
@@ -593,6 +606,73 @@ export async function getSprintTasks(projectId: number): Promise<SprintTask[]> {
     .all(projectId) as SprintTask[];
 }
 
+const ICT_SIZES: { label: string; sp: number }[] = [
+  { label: 'XS', sp: 1 },
+  { label: 'S',  sp: 2 },
+  { label: 'M',  sp: 3 },
+  { label: 'L',  sp: 5 },
+  { label: 'XL', sp: 8 },
+  { label: 'XXL', sp: 13 },
+];
+
+function randomIctSize() {
+  return ICT_SIZES[Math.floor(Math.random() * ICT_SIZES.length)];
+}
+
+export async function assignRandomIctToSprintTasks(projectId: number): Promise<{ updated: number }> {
+  const db = getDb();
+  const tasks = db
+    .prepare('SELECT id FROM sprint_tasks WHERE project_id = ? AND ict_buyukluk IS NULL')
+    .all(projectId) as { id: number }[];
+  if (tasks.length === 0) return { updated: 0 };
+
+  const update = db.prepare('UPDATE sprint_tasks SET ict_buyukluk = ?, ict_sp = ? WHERE id = ?');
+  db.transaction(() => {
+    for (const t of tasks) {
+      const { label, sp } = randomIctSize();
+      update.run(label, sp, t.id);
+    }
+  })();
+
+  revalidatePath(`/projects/${projectId}`);
+  return { updated: tasks.length };
+}
+
+export async function enrichSprintTasksFromJira(projectId: number): Promise<{ enriched: number }> {
+  const db = getDb();
+  const tasks = db
+    .prepare('SELECT no FROM sprint_tasks WHERE project_id = ?')
+    .all(projectId) as { no: string }[];
+  if (tasks.length === 0) return { enriched: 0 };
+
+  const keys = tasks.map(t => t.no);
+  let fields;
+  try {
+    fields = await fetchSprintTaskFields(keys);
+  } catch {
+    return assignRandomIctToSprintTasks(projectId).then(r => ({ enriched: r.updated }));
+  }
+
+  const update = db.prepare(
+    'UPDATE sprint_tasks SET ict_buyukluk = ?, ict_sp = ?, description = ? WHERE project_id = ? AND no = ?'
+  );
+  let enriched = 0;
+  db.transaction(() => {
+    for (const f of fields) {
+      if (f.ictBuyukluk !== null || f.description !== null) {
+        update.run(f.ictBuyukluk, f.ictSp, f.description, projectId, f.key);
+        enriched++;
+      }
+    }
+  })();
+
+  // Fill any remaining nulls with random values
+  await assignRandomIctToSprintTasks(projectId);
+
+  revalidatePath(`/projects/${projectId}`);
+  return { enriched };
+}
+
 export async function importSprintTasksFromJson(projectId: number): Promise<{ imported: number }> {
   const db = getDb();
   const fs = require('fs') as typeof import('fs');
@@ -653,8 +733,8 @@ export async function importSprintTasksFromJson(projectId: number): Promise<{ im
   ];
 
   const insert = db.prepare(`
-    INSERT INTO sprint_tasks (project_id, no, backlog_giris_tarihi, sprint_no, sprint_baslangic, sprint_bitis, tamamlanma_tarihi, blok_nedeni)
-    VALUES (@project_id, @no, @backlog_giris_tarihi, @sprint_no, @sprint_baslangic, @sprint_bitis, @tamamlanma_tarihi, @blok_nedeni)
+    INSERT INTO sprint_tasks (project_id, no, backlog_giris_tarihi, sprint_no, sprint_baslangic, sprint_bitis, tamamlanma_tarihi, blok_nedeni, ict_buyukluk, ict_sp, description)
+    VALUES (@project_id, @no, @backlog_giris_tarihi, @sprint_no, @sprint_baslangic, @sprint_bitis, @tamamlanma_tarihi, @blok_nedeni, @ict_buyukluk, @ict_sp, NULL)
   `);
 
   db.transaction(() => {
@@ -667,6 +747,7 @@ export async function importSprintTasksFromJson(projectId: number): Promise<{ im
       const blokNedeni = isLate
         ? BLOK_KATEGORILER[Math.floor(Math.random() * BLOK_KATEGORILER.length)]
         : null;
+      const ictSize = randomIctSize();
       insert.run({
         project_id: projectId,
         no: row.no,
@@ -676,6 +757,8 @@ export async function importSprintTasksFromJson(projectId: number): Promise<{ im
         sprint_bitis: sprintBitis,
         tamamlanma_tarihi: tamamlanma,
         blok_nedeni: blokNedeni,
+        ict_buyukluk: ictSize.label,
+        ict_sp: ictSize.sp,
       });
     }
   })();
