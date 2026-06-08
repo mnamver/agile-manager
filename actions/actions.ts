@@ -383,6 +383,51 @@ export async function getSubtasks(issueId: number): Promise<Subtask[]> {
   return db.prepare('SELECT * FROM subtasks WHERE issue_id = ? ORDER BY id').all(issueId) as Subtask[];
 }
 
+export type IssueDecomposition = {
+  issueId: number;
+  jiraId: string;
+  summary: string;
+  totalHours: number;
+  subtasks: {
+    title: string;
+    type: string;
+    assigned_to: string | null;
+    estimated_hours: number | null;
+  }[];
+};
+
+export async function getProjectDecompositions(projectId: number): Promise<IssueDecomposition[]> {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      j.id        AS issueId,
+      j.jira_id   AS jiraId,
+      j.summary   AS summary,
+      s.title     AS stTitle,
+      s.type      AS stType,
+      s.assigned_to AS stAssignee,
+      s.estimated_hours AS stHours
+    FROM jira_issues_cache j
+    JOIN subtasks s ON s.issue_id = j.id
+    WHERE j.project_id = ?
+    ORDER BY j.id, s.id
+  `).all(projectId) as {
+    issueId: number; jiraId: string; summary: string;
+    stTitle: string; stType: string; stAssignee: string | null; stHours: number | null;
+  }[];
+
+  const map = new Map<number, IssueDecomposition>();
+  for (const r of rows) {
+    if (!map.has(r.issueId)) {
+      map.set(r.issueId, { issueId: r.issueId, jiraId: r.jiraId, summary: r.summary, totalHours: 0, subtasks: [] });
+    }
+    const d = map.get(r.issueId)!;
+    d.subtasks.push({ title: r.stTitle, type: r.stType, assigned_to: r.stAssignee, estimated_hours: r.stHours });
+    d.totalHours += r.stHours ?? 0;
+  }
+  return [...map.values()];
+}
+
 export async function generateProjectReport(projectId: number): Promise<SprintReportResult> {
   const db = getDb();
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Project;

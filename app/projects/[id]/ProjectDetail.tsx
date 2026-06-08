@@ -24,7 +24,9 @@ import {
   assignRandomIctToSprintTasks,
   getBlokCozumOnerisi,
   getJiraIssues,
+  getProjectDecompositions,
 } from '@/actions/actions';
+import type { IssueDecomposition } from '@/actions/actions';
 import type { Project, TeamMember, ProjectNote, JiraIssue, SprintTask } from '@/lib/db';
 import type { BlokCozumResult } from '@/lib/gemini';
 import type { DecomposeResult, SprintReportResult, ChaosResult } from '@/lib/gemini';
@@ -99,6 +101,7 @@ export default function ProjectDetail({
   const [decomposing, setDecomposing] = useState(false);
   const [reportResult, setReportResult] = useState<SprintReportResult | null>(null);
   const [reportMetrics, setReportMetrics] = useState<SprintMetrics | null>(null);
+  const [decompositions, setDecompositions] = useState<IssueDecomposition[]>([]);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [reportCopied, setReportCopied] = useState(false);
   const [chaosModal, setChaosModal] = useState(false);
@@ -218,8 +221,12 @@ export default function ProjectDetail({
   }
 
   async function loadRaporTab() {
-    const metrics = await getSprintMetrics(project.id);
+    const [metrics, decomps] = await Promise.all([
+      getSprintMetrics(project.id),
+      getProjectDecompositions(project.id),
+    ]);
     setReportMetrics(metrics);
+    setDecompositions(decomps);
     if (!reportResult && !generatingReport) {
       setGeneratingReport(true);
       try {
@@ -686,6 +693,7 @@ export default function ProjectDetail({
               onGenerateReport={handleGenerateReport}
               onCopyReport={handleCopyReport}
               projectTitle={project.title}
+              decompositions={decompositions}
             />
           )}
 
@@ -902,12 +910,12 @@ export default function ProjectDetail({
 }
 
 const TYPE_COLOR: Record<string, string> = {
-  Frontend:  'bg-cyan-500/20 text-cyan-300',
-  Backend:   'bg-blue-500/20 text-blue-300',
-  Database:  'bg-indigo-500/20 text-indigo-300',
-  Test:      'bg-green-500/20 text-green-300',
-  DevOps:    'bg-orange-500/20 text-orange-300',
-  Design:    'bg-pink-500/20 text-pink-300',
+  Frontend:  'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  Backend:   'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  Database:  'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  Test:      'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  DevOps:    'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  Design:    'bg-pink-500/20 text-pink-300 border-pink-500/30',
 };
 
 const PRIORITY_BADGE: Record<string, string> = {
@@ -1283,6 +1291,7 @@ function ReportTabView({
   reportCopied,
   onGenerateReport,
   onCopyReport,
+  decompositions,
 }: {
   metrics: SprintMetrics | null;
   report: SprintReportResult | null;
@@ -1291,6 +1300,7 @@ function ReportTabView({
   onGenerateReport: () => void;
   onCopyReport: () => void;
   projectTitle: string;
+  decompositions: IssueDecomposition[];
 }) {
   const plannedSP = metrics?.plannedSP ?? 0;
   const doneSP = metrics?.doneSP ?? 0;
@@ -1596,6 +1606,97 @@ function ReportTabView({
           </div>
         </div>
       </div>
+
+      {/* ── Görev Kırılım Raporu ───────────────────────────────────── */}
+      {decompositions.length > 0 && (
+        <div className="bg-blue-900/40 border border-blue-800/40 rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-blue-800/40">
+            <p className="text-xs font-semibold text-blue-300 flex items-center gap-1.5">
+              <span>🔧</span> Görev Kırılım Raporu
+            </p>
+            <div className="flex items-center gap-3 text-xs text-blue-500">
+              <span>{decompositions.length} issue parçalandı</span>
+              <span className="text-amber-400 font-semibold">
+                {Math.round(decompositions.reduce((s, d) => s + d.totalHours, 0) * 2) / 2} saat toplam
+              </span>
+            </div>
+          </div>
+
+          <div className="divide-y divide-blue-800/30">
+            {decompositions.map(d => (
+              <DecompositionRow key={d.issueId} decomposition={d} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DecompositionRow({ decomposition: d }: { decomposition: IssueDecomposition }) {
+  const [open, setOpen] = useState(false);
+  const totalHours = Math.round(d.totalHours * 2) / 2;
+  const typeCount = [...new Set(d.subtasks.map(s => s.type))].length;
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-3 px-5 py-3 hover:bg-blue-800/20 transition-colors text-left"
+      >
+        <span className={`text-blue-500 text-xs transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        <span className="font-mono text-amber-400/80 text-xs w-28 shrink-0">{d.jiraId}</span>
+        <span className="flex-1 text-xs text-blue-200 truncate">{d.summary}</span>
+        <span className="text-xs text-blue-500 shrink-0">{d.subtasks.length} alt görev</span>
+        <span className="text-xs text-blue-500 shrink-0 w-20 text-right">{typeCount} alan</span>
+        <span className="text-xs font-semibold text-amber-400 shrink-0 w-16 text-right">{totalHours}h</span>
+      </button>
+
+      {open && (
+        <div className="px-5 pb-4">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-blue-800/30">
+                <th className="text-left py-2 pr-3 text-blue-500 font-medium w-8">#</th>
+                <th className="text-left py-2 pr-3 text-blue-500 font-medium">Alt Görev</th>
+                <th className="text-left py-2 pr-3 text-blue-500 font-medium w-24">Tip</th>
+                <th className="text-left py-2 pr-3 text-blue-500 font-medium w-32">Atanan</th>
+                <th className="text-right py-2 text-blue-500 font-medium w-16">Süre</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.subtasks.map((st, i) => (
+                <tr key={i} className="border-b border-blue-800/20 hover:bg-blue-800/10">
+                  <td className="py-2 pr-3 text-blue-700">{i + 1}</td>
+                  <td className="py-2 pr-3 text-blue-200">{st.title}</td>
+                  <td className="py-2 pr-3">
+                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-medium ${TYPE_COLOR[st.type] ?? 'bg-slate-500/20 text-slate-300 border-slate-500/30'}`}>
+                      {st.type}
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-5 h-5 rounded-full bg-blue-800 inline-flex items-center justify-center text-[9px] font-bold text-amber-300 shrink-0">
+                        {(st.assigned_to ?? '?').split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="text-blue-300 text-xs truncate">{st.assigned_to ?? '—'}</span>
+                    </span>
+                  </td>
+                  <td className="py-2 text-right">
+                    <span className="text-amber-400 font-semibold">{st.estimated_hours ?? '—'}h</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-blue-700/40">
+                <td colSpan={4} className="pt-2 text-xs text-blue-500 text-right pr-3">Toplam Tahmini Süre</td>
+                <td className="pt-2 text-right text-sm font-bold text-amber-400">{totalHours}h</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
