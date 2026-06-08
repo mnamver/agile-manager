@@ -38,7 +38,6 @@ const STATUS_CONFIG = {
 };
 
 const KANBAN_COLUMNS = [
-  { key: 'Open',              label: 'Open',              color: 'border-slate-500',   bg: 'bg-slate-500/10'   },
   { key: 'Analysis Done',     label: 'Analysis Done',     color: 'border-violet-500',  bg: 'bg-violet-500/10'  },
   { key: 'Development',       label: 'Development',       color: 'border-blue-500',    bg: 'bg-blue-500/10'    },
   { key: 'Development Done',  label: 'Development Done',  color: 'border-cyan-500',    bg: 'bg-cyan-500/10'    },
@@ -113,10 +112,11 @@ export default function ProjectDetail({
   // Kanban distribution
   const columnMap = new Map<string, JiraIssue[]>();
   for (const col of KANBAN_COLUMNS) columnMap.set(col.key, []);
+  const HIDDEN_STATUSES = new Set(['Open']);
   const extraStatuses = new Set<string>();
   for (const issue of issues) {
     if (columnMap.has(issue.status)) columnMap.get(issue.status)!.push(issue);
-    else {
+    else if (!HIDDEN_STATUSES.has(issue.status)) {
       extraStatuses.add(issue.status);
       if (!columnMap.has(issue.status)) columnMap.set(issue.status, []);
       columnMap.get(issue.status)!.push(issue);

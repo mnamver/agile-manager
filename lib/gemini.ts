@@ -37,17 +37,58 @@ function rnd(base: number): number {
   return Math.round((base + (Math.random() * 2 - 1)) * 2) / 2;
 }
 
-function mockDecompose(title: string, members: { name: string; role: string }[]): DecomposeResult {
-  const byRole = (role: string) => members.find(m => m.role.toLowerCase().includes(role.toLowerCase()))?.name ?? members[0]?.name ?? 'Ekip Üyesi';
-  const h = { fe: rnd(4), be: rnd(6), db: rnd(2), qa: rnd(3) };
-  const subtasks: SubtaskItem[] = [
-    { title: `${title} — Frontend UI geliştirme`,        type: 'Frontend',  assigned_to: byRole('Frontend'), estimated_hours: h.fe, reasoning: 'Frontend uzmanı en verimli' },
-    { title: `${title} — Backend API endpoint`,          type: 'Backend',   assigned_to: byRole('Backend'),  estimated_hours: h.be, reasoning: 'Backend business logic' },
-    { title: `${title} — Veritabanı şema güncellemesi`,  type: 'Database',  assigned_to: byRole('Backend'),  estimated_hours: h.db, reasoning: 'Backend DB sorumluluğu' },
-    { title: `${title} — QA test senaryoları`,           type: 'Test',      assigned_to: byRole('QA'),       estimated_hours: h.qa, reasoning: 'QA test coverage sağlar' },
-  ];
-  const total = h.fe + h.be + h.db + h.qa;
-  return { subtasks, total_estimated_hours: Math.round(total * 2) / 2, risk_note: 'Frontend-Backend koordinasyonu kritik noktada.' };
+type TaskTypeCandidate = {
+  type: SubtaskItem['type'];
+  label: string;
+  roleHint: string;
+  hours: number;
+  reasoning: string;
+  keywords: string[];
+};
+
+const ALL_TASK_TYPES: TaskTypeCandidate[] = [
+  { type: 'Frontend',  label: 'Frontend UI geliştirme',       roleHint: 'frontend',  hours: 4,   reasoning: 'Frontend uzmanı en verimli',             keywords: ['ui','arayüz','ekran','sayfa','form','modal','component','button','responsive','css','html','react','tasarım','görsel','display','render','kullanıcı arayüzü'] },
+  { type: 'Backend',   label: 'Backend API geliştirme',        roleHint: 'backend',   hours: 6,   reasoning: 'Backend business logic ve API sorumluluğu', keywords: ['api','servis','endpoint','rest','http','request','response','controller','service','business logic','sunucu','server','microservice','entegrasyon','integration','webhook','auth','token'] },
+  { type: 'Database',  label: 'Veritabanı şema güncellemesi',  roleHint: 'backend',   hours: 2,   reasoning: 'Backend DB şema sorumluluğu',             keywords: ['veritabanı','database','db','tablo','şema','schema','migration','sorgu','query','index','sql','nosql','redis','cache','data model'] },
+  { type: 'Test',      label: 'Test senaryoları ve QA',        roleHint: 'qa',        hours: 3,   reasoning: 'QA test coverage sağlar',                keywords: ['test','qa','senaryo','scenario','coverage','birim','unit','entegrasyon','regresyon','regression','doğrulama','validasyon','verification'] },
+  { type: 'DevOps',    label: 'CI/CD ve altyapı yapılandırması', roleHint: 'devops', hours: 3,   reasoning: 'DevOps altyapı ve deployment sorumluluğu', keywords: ['deploy','deployment','ci','cd','pipeline','docker','kubernetes','k8s','altyapı','infrastructure','ortam','environment','helm','nginx','cloud','aws','azure','monitoring','log'] },
+  { type: 'Design',    label: 'UI/UX tasarım ve prototipleme', roleHint: 'designer',  hours: 3,   reasoning: 'Tasarım spesifikasyonu gerekli',          keywords: ['tasarım','design','ux','prototip','prototype','figma','wireframe','mockup','akış','flow','kullanıcı deneyimi','user experience'] },
+];
+
+function selectTaskTypes(description: string): TaskTypeCandidate[] {
+  if (!description.trim()) {
+    // Rastgele 2-4 alan seç
+    const shuffled = [...ALL_TASK_TYPES].sort(() => Math.random() - 0.5);
+    const count = 2 + Math.floor(Math.random() * 3); // 2, 3 veya 4
+    return shuffled.slice(0, count);
+  }
+  const lower = description.toLowerCase();
+  const matched = ALL_TASK_TYPES.filter(t => t.keywords.some(kw => lower.includes(kw)));
+  // En az 2 alan garantile
+  if (matched.length >= 2) return matched;
+  const extras = ALL_TASK_TYPES.filter(t => !matched.includes(t)).sort(() => Math.random() - 0.5);
+  return [...matched, ...extras].slice(0, Math.max(2, matched.length));
+}
+
+function randomMember(members: { name: string; role: string }[]): string {
+  if (members.length === 0) return 'Ekip Üyesi';
+  return members[Math.floor(Math.random() * members.length)].name;
+}
+
+function mockDecompose(title: string, description: string, members: { name: string; role: string }[]): DecomposeResult {
+  const selected = selectTaskTypes(description);
+  const subtasks: SubtaskItem[] = selected.map(t => ({
+    title: `${title} — ${t.label}`,
+    type: t.type,
+    assigned_to: randomMember(members),
+    estimated_hours: rnd(t.hours),
+    reasoning: t.reasoning,
+  }));
+  const total = subtasks.reduce((s, st) => s + st.estimated_hours, 0);
+  const riskNote = description
+    ? 'Geliştirme alanları description analizi ile belirlendi; bağımlılıklar sprint boyunca takip edilmeli.'
+    : 'Description bulunmadığından alanlar rastgele atandı; sprint planlamasında gözden geçirilmeli.';
+  return { subtasks, total_estimated_hours: Math.round(total * 2) / 2, risk_note: riskNote };
 }
 
 function mockSprintReport(title: string, issues: { summary: string; status: string; story_points: number | null }[]): SprintReportResult {
@@ -161,10 +202,11 @@ Takım:
 ${memberList}
 
 Kurallar:
-- Her alt görev max 4 saatlik iş olsun
-- Frontend/Backend/DB/Test/DevOps kategorileri kullan
-- Üye rolüne göre ata (Backend → Backend geliştirici, Frontend → Frontend geliştirici, Test → QA)
-- Eğer uygun rol yoksa en yakın kişiye ata
+- Task başlığını ve açıklamasını dikkatlice analiz et; hangi teknik alanların gerçekten gerekli olduğuna karar ver.
+- Açıklamada Frontend söz konusu değilse Frontend alt görevi oluşturma. Backend, DB, Test, DevOps, Design için de aynı kural.
+- Açıklama yoksa mantıklı varsayımlarla 2-3 alan seç; 4 alanı zorla doldurma.
+- Her alt görev max 4 saatlik iş olsun.
+- Üye rolüne göre ata; uygun rol yoksa en yakın kişiye ata.
 
 Sadece JSON döndür:
 {
@@ -185,7 +227,7 @@ Sadece JSON döndür:
     const text = await askGemini(prompt);
     return extractJson<DecomposeResult>(text);
   } catch {
-    return mockDecompose(title, members);
+    return mockDecompose(title, description, members);
   }
 }
 
