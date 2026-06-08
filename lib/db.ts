@@ -91,6 +91,19 @@ function initSchema(db: Database.Database) {
       summary    TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS sprint_tasks (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id           INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      no                   TEXT    NOT NULL,
+      backlog_giris_tarihi TEXT,
+      sprint_no            INTEGER,
+      sprint_baslangic     TEXT,
+      sprint_bitis         TEXT,
+      tamamlanma_tarihi    TEXT,
+      blok_nedeni          TEXT,
+      imported_at          TEXT    DEFAULT (datetime('now'))
+    );
   `);
 
   // Migrations — mevcut DB'ye yeni kolonları ekle
@@ -98,6 +111,11 @@ function initSchema(db: Database.Database) {
   if (!cols.includes('board_id')) {
     db.exec(`ALTER TABLE projects ADD COLUMN board_id INTEGER`);
   }
+  const sprintTaskCols = (db.prepare(`PRAGMA table_info(sprint_tasks)`).all() as {name:string}[]).map(c=>c.name);
+  if (!sprintTaskCols.includes('blok_nedeni')) {
+    db.exec(`ALTER TABLE sprint_tasks ADD COLUMN blok_nedeni TEXT`);
+  }
+
   const issueCols = (db.prepare(`PRAGMA table_info(jira_issues_cache)`).all() as {name:string}[]).map(c=>c.name);
   if (!issueCols.includes('issue_type')) {
     db.exec(`ALTER TABLE jira_issues_cache ADD COLUMN issue_type TEXT DEFAULT 'Task'`);
@@ -359,4 +377,17 @@ export type AiReport = {
   project_id: number;
   summary: string;
   created_at: string;
+};
+
+export type SprintTask = {
+  id: number;
+  project_id: number;
+  no: string;
+  backlog_giris_tarihi: string | null;
+  sprint_no: number | null;
+  sprint_baslangic: string | null;
+  sprint_bitis: string | null;
+  tamamlanma_tarihi: string | null;
+  blok_nedeni: string | null;
+  imported_at: string;
 };

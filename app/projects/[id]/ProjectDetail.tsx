@@ -13,10 +13,21 @@ import {
   estimateAllIssuePoints,
   decomposeIssue,
   generateProjectReport,
+  getLatestReport,
+  getSprintMetrics,
   parseChaosText,
+  loadBacklog,
+  estimateBacklogItem,
+  getSprintTasks,
+  importSprintTasksFromJson,
+  getBlokCozumOnerisi,
+  getJiraIssues,
 } from '@/actions/actions';
-import type { Project, TeamMember, ProjectNote, JiraIssue } from '@/lib/db';
+import type { Project, TeamMember, ProjectNote, JiraIssue, SprintTask } from '@/lib/db';
+import type { BlokCozumResult } from '@/lib/gemini';
 import type { DecomposeResult, SprintReportResult, ChaosResult } from '@/lib/gemini';
+import type { SprintMetrics } from '@/actions/actions';
+import type { BacklogItem } from '@/lib/jira';
 
 const STATUS_CONFIG = {
   active:  { label: 'Aktif',        color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
@@ -59,7 +70,25 @@ export default function ProjectDetail({
   const [addingNote, setAddingNote] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [view, setView] = useState<'kanban' | 'list'>('kanban');
+  const [view, setView] = useState<'kanban' | 'list' | 'backlog' | 'rapor' | 'plan'>('kanban');
+
+  // Sprint Plan state
+  const [sprintTasks, setSprintTasks] = useState<SprintTask[]>([]);
+  const [planLoading, setPlanLoading] = useState(false);
+
+  // Backlog state
+  const [backlogItems, setBacklogItems] = useState<BacklogItem[]>([]);
+  const [backlogTotal, setBacklogTotal] = useState(0);
+  const [backlogSource, setBacklogSource] = useState<'jira' | 'mock' | null>(null);
+  const [backlogLoading, setBacklogLoading] = useState(false);
+  const [backlogPage, setBacklogPage] = useState(0);
+  const [backlogFilter, setBacklogFilter] = useState('');
+  const [backlogPriority, setBacklogPriority] = useState<string>('all');
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [estimatingKeys, setEstimatingKeys] = useState<Set<string>>(new Set());
+  const [estimatedPoints, setEstimatedPoints] = useState<Record<string, number>>({});
+  const [bulkEstimating, setBulkEstimating] = useState(false);
+  const PAGE_SIZE = 50;
 
   // AI state
   const [estimatingAll, setEstimatingAll] = useState(false);
@@ -67,9 +96,10 @@ export default function ProjectDetail({
   const [decomposeModal, setDecomposeModal] = useState<{ issueId: number; title: string } | null>(null);
   const [decomposeResult, setDecomposeResult] = useState<DecomposeResult | null>(null);
   const [decomposing, setDecomposing] = useState(false);
-  const [reportModal, setReportModal] = useState(false);
   const [reportResult, setReportResult] = useState<SprintReportResult | null>(null);
+  const [reportMetrics, setReportMetrics] = useState<SprintMetrics | null>(null);
   const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportCopied, setReportCopied] = useState(false);
   const [chaosModal, setChaosModal] = useState(false);
   const [chaosText, setChaosText] = useState('');
   const [chaosResult, setChaosResult] = useState<ChaosResult | null>(null);
@@ -129,11 +159,126 @@ export default function ProjectDetail({
     } finally { setRefreshing(false); }
   }
 
+  async function loadBacklogPage(page: number, reset = false) {
+    setBacklogLoading(true);
+    try {
+      const { items, total, source } = await loadBacklog(project.id, page * PAGE_SIZE, PAGE_SIZE);
+      setBacklogItems(prev => reset ? items : [...prev, ...items]);
+      setBacklogTotal(total);
+      setBacklogSource(source);
+      setBacklogPage(page);
+    } finally {
+      setBacklogLoading(false);
+    }
+  }
+
+  function handleViewChange(v: 'kanban' | 'list' | 'backlog' | 'rapor' | 'plan') {
+    setView(v);
+    if (v === 'backlog' && backlogItems.length === 0) {
+      loadBacklogPage(0, true);
+    }
+    if (v === 'rapor') {
+      loadRaporTab();
+    }
+    if (v === 'plan' && sprintTasks.length === 0) {
+      loadPlanTab();
+    }
+  }
+
+  async function loadPlanTab() {
+    setPlanLoading(true);
+    try {
+      let tasks = await getSprintTasks(project.id);
+      if (tasks.length === 0) {
+        await importSprintTasksFromJson(project.id);
+        tasks = await getSprintTasks(project.id);
+      }
+      setSprintTasks(tasks);
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
+  async function handleReimportPlan() {
+    setPlanLoading(true);
+    try {
+      await importSprintTasksFromJson(project.id);
+      const tasks = await getSprintTasks(project.id);
+      setSprintTasks(tasks);
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
+  async function loadRaporTab() {
+    const metrics = await getSprintMetrics(project.id);
+    setReportMetrics(metrics);
+    if (!reportResult && !generatingReport) {
+      setGeneratingReport(true);
+      try {
+        const latest = await getLatestReport(project.id);
+        if (latest) {
+          setReportResult(JSON.parse(latest.summary) as SprintReportResult);
+        } else {
+          const report = await generateProjectReport(project.id);
+          setReportResult(report);
+        }
+      } finally { setGeneratingReport(false); }
+    }
+  }
+
+  async function handleEstimateSingleBacklog(item: BacklogItem) {
+    setEstimatingKeys(prev => new Set(prev).add(item.key));
+    try {
+      const { points } = await estimateBacklogItem(item.key, item.summary);
+      setEstimatedPoints(prev => ({ ...prev, [item.key]: points }));
+    } finally {
+      setEstimatingKeys(prev => { const s = new Set(prev); s.delete(item.key); return s; });
+    }
+  }
+
+  async function handleBulkEstimate() {
+    const toEstimate = [...selectedKeys].filter(k => {
+      const item = backlogItems.find(i => i.key === k);
+      return item && item.storyPoints == null && estimatedPoints[k] == null;
+    });
+    if (toEstimate.length === 0) return;
+    setBulkEstimating(true);
+    for (const key of toEstimate) {
+      const item = backlogItems.find(i => i.key === key)!;
+      setEstimatingKeys(prev => new Set(prev).add(key));
+      try {
+        const { points } = await estimateBacklogItem(key, item.summary);
+        setEstimatedPoints(prev => ({ ...prev, [key]: points }));
+      } finally {
+        setEstimatingKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+      }
+    }
+    setBulkEstimating(false);
+  }
+
+  function toggleSelect(key: string) {
+    setSelectedKeys(prev => {
+      const s = new Set(prev);
+      s.has(key) ? s.delete(key) : s.add(key);
+      return s;
+    });
+  }
+
+  function toggleSelectAll(filtered: BacklogItem[]) {
+    if (filtered.every(i => selectedKeys.has(i.key))) {
+      setSelectedKeys(prev => { const s = new Set(prev); filtered.forEach(i => s.delete(i.key)); return s; });
+    } else {
+      setSelectedKeys(prev => { const s = new Set(prev); filtered.forEach(i => s.add(i.key)); return s; });
+    }
+  }
+
   async function handleEstimateAll() {
     setEstimatingAll(true);
     try {
       await estimateAllIssuePoints(project.id);
-      startTransition(() => router.refresh());
+      const fresh = await getJiraIssues(project.id);
+      setIssues(fresh);
     } finally { setEstimatingAll(false); }
   }
 
@@ -166,9 +311,37 @@ export default function ProjectDetail({
     setGeneratingReport(true);
     setReportResult(null);
     try {
-      const result = await generateProjectReport(project.id);
-      setReportResult(result);
+      const [metrics, report] = await Promise.all([
+        getSprintMetrics(project.id),
+        generateProjectReport(project.id),
+        new Promise(r => setTimeout(r, 800)),
+      ] as [Promise<SprintMetrics>, Promise<SprintReportResult>, Promise<unknown>]);
+      setReportMetrics(metrics);
+      setReportResult(report);
     } finally { setGeneratingReport(false); }
+  }
+
+  function handleCopyReport() {
+    if (!reportResult) return;
+    const text = [
+      `Sprint Raporu — ${project.title}`,
+      '',
+      reportResult.summary,
+      '',
+      'Bu Sprint Ne Başardık?',
+      ...reportResult.accomplishments.map(a => `• ${a}`),
+      '',
+      'Velocity Analizi:',
+      reportResult.velocity_analysis,
+      ...(reportResult.risks.length > 0 ? ['', 'Riskler:', ...reportResult.risks.map(r => `⚠️ ${r}`)] : []),
+      '',
+      'Sonraki Sprint Önerisi:',
+      reportResult.next_sprint_suggestion,
+    ].join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setReportCopied(true);
+      setTimeout(() => setReportCopied(false), 2000);
+    });
   }
 
   async function handleParseChaos() {
@@ -266,7 +439,7 @@ export default function ProjectDetail({
               {/* Estimate All */}
               <button
                 onClick={handleEstimateAll}
-                disabled={estimatingAll || !hasUnestimated}
+                disabled={estimatingAll}
                 className="text-xs px-3 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 rounded-lg transition-all disabled:opacity-40 flex items-center gap-2"
               >
                 {estimatingAll ? (
@@ -278,11 +451,10 @@ export default function ProjectDetail({
 
               {/* Sprint Report */}
               <button
-                onClick={() => { setReportModal(true); handleGenerateReport(); }}
-                disabled={generatingReport}
-                className="text-xs px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 rounded-lg transition-all disabled:opacity-40 flex items-center gap-2"
+                onClick={() => handleViewChange('rapor')}
+                className="text-xs px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 rounded-lg transition-all flex items-center gap-2"
               >
-                <span>📊</span> Sprint Raporu Oluştur
+                <span>📊</span> Sprint Raporu & Dashboard
               </button>
 
               {/* Chaos to Clarity */}
@@ -354,13 +526,25 @@ export default function ProjectDetail({
             </div>
             <div className="flex gap-1 ml-auto">
               <div className="flex border border-blue-700/50 rounded-lg overflow-hidden">
-                <button onClick={() => setView('kanban')}
+                <button onClick={() => handleViewChange('kanban')}
                   className={`px-3 py-1.5 text-xs transition-colors ${view==='kanban' ? 'bg-amber-400 text-blue-900 font-medium' : 'text-blue-400 hover:text-white'}`}>
                   Board
                 </button>
-                <button onClick={() => setView('list')}
+                <button onClick={() => handleViewChange('list')}
                   className={`px-3 py-1.5 text-xs transition-colors ${view==='list' ? 'bg-amber-400 text-blue-900 font-medium' : 'text-blue-400 hover:text-white'}`}>
                   Liste
+                </button>
+                <button onClick={() => handleViewChange('backlog')}
+                  className={`px-3 py-1.5 text-xs transition-colors ${view==='backlog' ? 'bg-amber-400 text-blue-900 font-medium' : 'text-blue-400 hover:text-white'}`}>
+                  Backlog
+                </button>
+                <button onClick={() => handleViewChange('rapor')}
+                  className={`px-3 py-1.5 text-xs transition-colors ${view==='rapor' ? 'bg-amber-400 text-blue-900 font-medium' : 'text-blue-400 hover:text-white'}`}>
+                  📊 Rapor
+                </button>
+                <button onClick={() => handleViewChange('plan')}
+                  className={`px-3 py-1.5 text-xs transition-colors ${view==='plan' ? 'bg-amber-400 text-blue-900 font-medium' : 'text-blue-400 hover:text-white'}`}>
+                  📋 Sprint Planı
                 </button>
               </div>
               {(isBoard || project.jira_key) && (
@@ -458,6 +642,54 @@ export default function ProjectDetail({
               </div>
             </div>
           )}
+
+          {/* ─── BACKLOG VIEW ──────────────────────────────────────────── */}
+          {view === 'backlog' && (
+            <BacklogView
+              items={backlogItems}
+              total={backlogTotal}
+              source={backlogSource}
+              loading={backlogLoading}
+              page={backlogPage}
+              pageSize={PAGE_SIZE}
+              filter={backlogFilter}
+              priorityFilter={backlogPriority}
+              selectedKeys={selectedKeys}
+              estimatingKeys={estimatingKeys}
+              estimatedPoints={estimatedPoints}
+              bulkEstimating={bulkEstimating}
+              onFilterChange={setBacklogFilter}
+              onPriorityChange={setBacklogPriority}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+              onEstimateSingle={handleEstimateSingleBacklog}
+              onBulkEstimate={handleBulkEstimate}
+              onLoadMore={() => loadBacklogPage(backlogPage + 1)}
+              onRefresh={() => loadBacklogPage(0, true)}
+            />
+          )}
+
+          {/* ─── RAPOR & DASHBOARD VIEW ────────────────────────────────── */}
+          {view === 'rapor' && (
+            <ReportTabView
+              metrics={reportMetrics}
+              report={reportResult}
+              generatingReport={generatingReport}
+              reportCopied={reportCopied}
+              onGenerateReport={handleGenerateReport}
+              onCopyReport={handleCopyReport}
+              projectTitle={project.title}
+            />
+          )}
+
+          {/* ─── SPRINT PLANI VIEW ─────────────────────────────────────── */}
+          {view === 'plan' && (
+            <SprintPlanView
+              tasks={sprintTasks}
+              loading={planLoading}
+              onReimport={handleReimportPlan}
+            />
+          )}
         </main>
       </div>
 
@@ -539,90 +771,6 @@ export default function ProjectDetail({
                     onClick={handleDecompose}
                     disabled={decomposing}
                     className="w-full py-2 text-xs text-purple-400 border border-purple-500/30 rounded-lg hover:bg-purple-500/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Yeniden Oluştur
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── SPRINT REPORT MODAL ──────────────────────────────────────── */}
-      {reportModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={e => e.target === e.currentTarget && !generatingReport && setReportModal(false)}>
-          <div className="bg-blue-900 border border-blue-700/60 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-blue-800/50">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <span>📊</span> AI Sprint Review Raporu
-              </h2>
-              {!generatingReport && (
-                <button onClick={() => setReportModal(false)} className="text-blue-400 hover:text-white text-xl">✕</button>
-              )}
-            </div>
-            <div className="px-6 py-5">
-              {generatingReport && (
-                <div className="flex flex-col items-center py-12 gap-4">
-                  <div className="w-10 h-10 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-blue-300 text-sm">AI sprint verilerini analiz ediyor...</p>
-                </div>
-              )}
-              {reportResult && (
-                <div className="space-y-5">
-                  {/* Executive Summary */}
-                  <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl p-4">
-                    <p className="text-xs font-semibold text-blue-300 mb-2">Özet</p>
-                    <p className="text-sm text-white leading-relaxed">{reportResult.summary}</p>
-                  </div>
-
-                  {/* Accomplishments */}
-                  <div>
-                    <p className="text-xs font-semibold text-emerald-300 mb-2 flex items-center gap-1.5">
-                      <span>✅</span> Bu Sprint Ne Başardık?
-                    </p>
-                    <ul className="space-y-1.5">
-                      {reportResult.accomplishments.map((a, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-blue-200">
-                          <span className="text-emerald-400 mt-0.5 shrink-0">•</span> {a}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  {/* Velocity */}
-                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
-                    <p className="text-xs font-semibold text-amber-300 mb-1">Velocity Analizi</p>
-                    <p className="text-sm text-white">{reportResult.velocity_analysis}</p>
-                  </div>
-
-                  {/* Risks */}
-                  {reportResult.risks.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-red-300 mb-2 flex items-center gap-1.5">
-                        <span>⚠️</span> Riskler
-                      </p>
-                      <ul className="space-y-1.5">
-                        {reportResult.risks.map((r, i) => (
-                          <li key={i} className="flex items-start gap-2 text-sm text-blue-200">
-                            <span className="text-red-400 mt-0.5 shrink-0">•</span> {r}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Next Sprint */}
-                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4">
-                    <p className="text-xs font-semibold text-purple-300 mb-1">Sonraki Sprint Önerisi</p>
-                    <p className="text-sm text-white">{reportResult.next_sprint_suggestion}</p>
-                  </div>
-
-                  <button
-                    onClick={handleGenerateReport}
-                    disabled={generatingReport}
-                    className="w-full py-2 text-xs text-blue-400 border border-blue-500/30 rounded-lg hover:bg-blue-500/10 transition-all disabled:opacity-40"
                   >
                     Yeniden Oluştur
                   </button>
@@ -836,5 +984,835 @@ function StatusPill({ status }: { status: string }) {
   const cls = map[status] ?? 'bg-slate-500/20 text-slate-300 border-slate-500/30';
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full border ${cls} whitespace-nowrap`}>{status}</span>
+  );
+}
+
+// ─── BACKLOG VIEW COMPONENT ────────────────────────────────────────────────────
+
+type BacklogViewProps = {
+  items: BacklogItem[];
+  total: number;
+  source: 'jira' | 'mock' | null;
+  loading: boolean;
+  page: number;
+  pageSize: number;
+  filter: string;
+  priorityFilter: string;
+  selectedKeys: Set<string>;
+  estimatingKeys: Set<string>;
+  estimatedPoints: Record<string, number>;
+  bulkEstimating: boolean;
+  onFilterChange: (v: string) => void;
+  onPriorityChange: (v: string) => void;
+  onToggleSelect: (key: string) => void;
+  onToggleSelectAll: (filtered: BacklogItem[]) => void;
+  onEstimateSingle: (item: BacklogItem) => void;
+  onBulkEstimate: () => void;
+  onLoadMore: () => void;
+  onRefresh: () => void;
+};
+
+const BL_PRIORITY_DOT: Record<string, string> = {
+  Critical: 'bg-red-400', High: 'bg-orange-400', Medium: 'bg-amber-400', Low: 'bg-slate-400', None: 'bg-slate-600',
+};
+const BL_PRIORITY_TEXT: Record<string, string> = {
+  Critical: 'text-red-300', High: 'text-orange-300', Medium: 'text-amber-300', Low: 'text-slate-400',
+};
+const BL_TYPE_BADGE: Record<string, string> = {
+  Story: 'text-blue-300 bg-blue-500/20',
+  Bug: 'text-red-300 bg-red-500/20',
+  Task: 'text-slate-300 bg-slate-500/20',
+  Epic: 'text-purple-300 bg-purple-500/20',
+};
+
+function BacklogView({
+  items, total, source, loading, page, pageSize, filter, priorityFilter,
+  selectedKeys, estimatingKeys, estimatedPoints, bulkEstimating,
+  onFilterChange, onPriorityChange, onToggleSelect, onToggleSelectAll,
+  onEstimateSingle, onBulkEstimate, onLoadMore, onRefresh,
+}: BacklogViewProps) {
+  const filtered = items.filter(i => {
+    const matchText = filter === '' || i.summary.toLowerCase().includes(filter.toLowerCase()) || i.key.toLowerCase().includes(filter.toLowerCase());
+    const matchPrio = priorityFilter === 'all' || i.priority === priorityFilter;
+    return matchText && matchPrio;
+  });
+
+  const allSelected = filtered.length > 0 && filtered.every(i => selectedKeys.has(i.key));
+  const selectedCount = filtered.filter(i => selectedKeys.has(i.key)).length;
+  const needEstimate = filtered.filter(i => selectedKeys.has(i.key) && i.storyPoints == null && estimatedPoints[i.key] == null).length;
+  const loaded = items.length;
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-blue-800/50 bg-blue-900/10 shrink-0 flex-wrap gap-y-2">
+        {/* Search */}
+        <div className="relative">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            value={filter}
+            onChange={e => onFilterChange(e.target.value)}
+            placeholder="Issue ara..."
+            className="pl-8 pr-3 py-1.5 bg-blue-950 border border-blue-700/50 rounded-lg text-xs text-white placeholder-blue-600 focus:outline-none focus:border-amber-400 w-52"
+          />
+        </div>
+
+        {/* Priority filter */}
+        <select
+          value={priorityFilter}
+          onChange={e => onPriorityChange(e.target.value)}
+          className="bg-blue-950 border border-blue-700/50 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+        >
+          <option value="all">Tüm Öncelikler</option>
+          <option value="Critical">Critical</option>
+          <option value="High">High</option>
+          <option value="Medium">Medium</option>
+          <option value="Low">Low</option>
+        </select>
+
+        {/* Stats */}
+        <span className="text-xs text-blue-500">
+          {filtered.length} gösterilen / {total} toplam
+        </span>
+
+        {/* Source badge */}
+        {source && (
+          <span className={`text-xs px-2 py-0.5 rounded-full border ${source === 'jira' ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' : 'text-amber-300 border-amber-500/30 bg-amber-500/10'}`}>
+            {source === 'jira' ? '🟢 Jira Live' : '🟡 Mock Data'}
+          </span>
+        )}
+
+        <div className="ml-auto flex gap-2 items-center">
+          {/* Bulk estimate */}
+          {selectedCount > 0 && (
+            <button
+              onClick={onBulkEstimate}
+              disabled={bulkEstimating || needEstimate === 0}
+              className="text-xs px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 rounded-lg transition-all disabled:opacity-40 flex items-center gap-1.5"
+            >
+              {bulkEstimating
+                ? <><span className="w-3 h-3 border border-purple-400 border-t-transparent rounded-full animate-spin" /> Tahmin ediliyor...</>
+                : <><span>🎯</span> {selectedCount} Seçiliyi Tahmin Et {needEstimate > 0 ? `(${needEstimate} SP yok)` : '(hepsi tahmin edildi)'}</>
+              }
+            </button>
+          )}
+
+          {/* Refresh */}
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="text-xs px-3 py-1.5 border border-blue-700/50 hover:border-amber-400/50 text-blue-400 hover:text-amber-400 rounded-lg transition-all flex items-center gap-1.5 disabled:opacity-40"
+          >
+            {loading
+              ? <><span className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin" /> Yükleniyor...</>
+              : <><svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg> Yenile</>
+            }
+          </button>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
+        {loading && items.length === 0 ? (
+          <div className="flex items-center justify-center h-48 gap-3">
+            <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+            <span className="text-blue-400 text-sm">Jira backlog yükleniyor...</span>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-blue-500 gap-2">
+            <span className="text-3xl">📭</span>
+            <p className="text-sm">Sonuç bulunamadı.</p>
+          </div>
+        ) : (
+          <table className="w-full text-xs border-collapse">
+            <thead className="sticky top-0 bg-blue-950 z-10">
+              <tr className="border-b border-blue-800/50">
+                <th className="w-10 px-4 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={() => onToggleSelectAll(filtered)}
+                    className="accent-amber-400 cursor-pointer"
+                  />
+                </th>
+                <th className="text-left px-2 py-2.5 text-blue-400 font-medium w-24">Key</th>
+                <th className="text-left px-2 py-2.5 text-blue-400 font-medium">Özet</th>
+                <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-20">Tip</th>
+                <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-20">Öncelik</th>
+                <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-20">SP</th>
+                <th className="text-left px-2 py-2.5 text-blue-400 font-medium w-32">Kişi</th>
+                <th className="w-24 px-2 py-2.5"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((item, idx) => {
+                const sp = item.storyPoints ?? estimatedPoints[item.key] ?? null;
+                const isEstimated = item.storyPoints == null && estimatedPoints[item.key] != null;
+                const isSelected = selectedKeys.has(item.key);
+                const isEstimating = estimatingKeys.has(item.key);
+
+                return (
+                  <tr
+                    key={item.key}
+                    onClick={() => onToggleSelect(item.key)}
+                    className={`border-b border-blue-800/30 cursor-pointer transition-colors ${isSelected ? 'bg-amber-400/8 hover:bg-amber-400/12' : idx % 2 === 0 ? 'bg-blue-900/20 hover:bg-blue-900/40' : 'hover:bg-blue-900/30'}`}
+                  >
+                    {/* Checkbox */}
+                    <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onToggleSelect(item.key)}
+                        className="accent-amber-400 cursor-pointer"
+                      />
+                    </td>
+
+                    {/* Key */}
+                    <td className="px-2 py-2.5">
+                      <span className="font-mono text-amber-400/80 whitespace-nowrap">{item.key}</span>
+                    </td>
+
+                    {/* Summary */}
+                    <td className="px-2 py-2.5">
+                      <span className="text-white line-clamp-2 leading-tight">{item.summary}</span>
+                    </td>
+
+                    {/* Type */}
+                    <td className="px-2 py-2.5 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${BL_TYPE_BADGE[item.issueType] ?? 'text-slate-300 bg-slate-500/20'}`}>
+                        {item.issueType}
+                      </span>
+                    </td>
+
+                    {/* Priority */}
+                    <td className="px-2 py-2.5 text-center">
+                      <span className={`flex items-center justify-center gap-1 ${BL_PRIORITY_TEXT[item.priority] ?? 'text-slate-400'}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${BL_PRIORITY_DOT[item.priority] ?? 'bg-slate-500'}`} />
+                        {item.priority}
+                      </span>
+                    </td>
+
+                    {/* Story Points */}
+                    <td className="px-2 py-2.5 text-center">
+                      {isEstimating ? (
+                        <span className="w-4 h-4 border border-purple-400 border-t-transparent rounded-full animate-spin inline-block" />
+                      ) : sp != null ? (
+                        <span className={`px-2 py-0.5 rounded font-bold ${isEstimated ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : SP_COLOR(sp)}`}>
+                          {sp}{isEstimated && ' ✨'}
+                        </span>
+                      ) : (
+                        <span className="text-blue-700">—</span>
+                      )}
+                    </td>
+
+                    {/* Assignee */}
+                    <td className="px-2 py-2.5">
+                      <span className="text-blue-400 truncate block max-w-[120px]">{item.assignee}</span>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-2 py-2.5" onClick={e => e.stopPropagation()}>
+                      {sp == null && !isEstimating && (
+                        <button
+                          onClick={() => onEstimateSingle(item)}
+                          className="text-xs px-2 py-1 rounded bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 transition-all whitespace-nowrap"
+                        >
+                          🎯 Tahmin
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+
+        {/* Load more */}
+        {!loading && loaded < total && (
+          <div className="flex justify-center py-6">
+            <button
+              onClick={onLoadMore}
+              className="px-5 py-2 text-xs border border-blue-700/50 hover:border-amber-400/50 text-blue-400 hover:text-amber-400 rounded-lg transition-all"
+            >
+              Daha Fazla Yükle ({loaded} / {total})
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Selection summary bar */}
+      {selectedCount > 0 && (
+        <div className="shrink-0 border-t border-amber-500/20 bg-amber-500/5 px-5 py-2.5 flex items-center gap-4">
+          <span className="text-xs text-amber-300 font-medium">{selectedCount} issue seçildi</span>
+          <span className="text-xs text-blue-500">
+            {filtered.filter(i => selectedKeys.has(i.key) && (i.storyPoints != null || estimatedPoints[i.key] != null))
+              .reduce((s, i) => s + (i.storyPoints ?? estimatedPoints[i.key] ?? 0), 0)} SP toplam
+          </span>
+          <button
+            onClick={() => filtered.forEach(i => selectedKeys.has(i.key) && onToggleSelect(i.key))}
+            className="text-xs text-blue-500 hover:text-blue-300 ml-auto"
+          >
+            Seçimi Temizle
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SPRINT REPORT + DASHBOARD TAB ────────────────────────────────────────────
+
+const DONE_STATUSES_SET = new Set(['Done', 'Canlı', 'Ready For Release', 'Closed', 'Resolved']);
+const IN_PROG_STATUSES_SET = new Set(['In Progress', 'Development', 'Development Done', 'Test', 'Ready to Test', 'Analysis Done']);
+const PRIORITY_ORDER: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3, None: 4 };
+
+function ReportTabView({
+  metrics,
+  report,
+  generatingReport,
+  reportCopied,
+  onGenerateReport,
+  onCopyReport,
+}: {
+  metrics: SprintMetrics | null;
+  report: SprintReportResult | null;
+  generatingReport: boolean;
+  reportCopied: boolean;
+  onGenerateReport: () => void;
+  onCopyReport: () => void;
+  projectTitle: string;
+}) {
+  const plannedSP = metrics?.plannedSP ?? 0;
+  const doneSP = metrics?.doneSP ?? 0;
+  const inProgressSP = metrics?.inProgressSP ?? 0;
+  const donePct   = plannedSP > 0 ? (doneSP / plannedSP) * 100 : 0;
+  const inProgPct = plannedSP > 0 ? (inProgressSP / plannedSP) * 100 : 0;
+  const openPct   = Math.max(0, 100 - donePct - inProgPct);
+  const completionRate = metrics?.completionRate ?? 0;
+  const rateColor = completionRate >= 70 ? 'text-emerald-400' : completionRate >= 40 ? 'text-amber-400' : 'text-red-400';
+
+  return (
+    <div className="flex-1 overflow-y-auto p-5 space-y-5">
+
+      {/* ── KPI Cards ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-blue-900/50 border border-blue-800/50 rounded-xl p-4 text-center">
+          <div className="text-2xl font-bold text-white">{metrics ? metrics.totalIssues : '—'}</div>
+          <div className="text-xs text-blue-400 mt-1">Toplam Issue</div>
+        </div>
+        <div className="bg-blue-900/50 border border-blue-800/50 rounded-xl p-4 text-center">
+          <div className="text-2xl font-bold text-amber-400">{plannedSP || '—'}</div>
+          <div className="text-xs text-blue-400 mt-1">Planlanan SP</div>
+        </div>
+        <div className="bg-blue-900/50 border border-emerald-700/30 rounded-xl p-4 text-center">
+          <div className="text-2xl font-bold text-emerald-400">{metrics ? doneSP : '—'}</div>
+          <div className="text-xs text-blue-400 mt-1">Tamamlanan SP</div>
+        </div>
+        <div className="bg-blue-900/50 border border-blue-800/50 rounded-xl p-4 text-center">
+          <div className={`text-2xl font-bold ${rateColor}`}>{plannedSP > 0 ? `%${completionRate}` : '—'}</div>
+          <div className="text-xs text-blue-400 mt-1">Tamamlanma</div>
+        </div>
+      </div>
+
+      {/* ── SP Progress Bar ────────────────────────────────────────── */}
+      {plannedSP > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-blue-300">Sprint İlerlemesi (Story Point bazlı)</p>
+            <div className="flex items-center gap-4 text-xs text-blue-400">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Done ({doneSP} SP)</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" /> Devam ({inProgressSP} SP)</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-600 inline-block" /> Bekliyor ({metrics?.remaining} SP)</span>
+            </div>
+          </div>
+          <div className="h-5 rounded-full overflow-hidden flex bg-slate-800">
+            {donePct > 0   && <div className="bg-emerald-500 h-full transition-all" style={{ width: `${donePct}%` }} />}
+            {inProgPct > 0 && <div className="bg-blue-500 h-full transition-all"    style={{ width: `${inProgPct}%` }} />}
+            {openPct > 0   && <div className="bg-slate-600 h-full"                  style={{ width: `${openPct}%` }} />}
+          </div>
+          <div className="flex justify-between text-xs text-blue-600 mt-1">
+            <span>0 SP</span>
+            <span className="text-amber-400/70">Sapma: {plannedSP - doneSP > 0 ? `+${plannedSP - doneSP}` : plannedSP - doneSP} SP</span>
+            <span>{plannedSP} SP</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Two-column: Metrics left — AI report right ─────────────── */}
+      <div className="grid grid-cols-2 gap-5">
+
+        {/* Left: Status + Assignee + Priority */}
+        <div className="space-y-4">
+
+          {metrics && metrics.byStatus.length > 0 && (
+            <div className="bg-blue-900/40 border border-blue-800/40 rounded-xl p-4">
+              <p className="text-xs font-semibold text-blue-300 mb-3">Durum Dağılımı</p>
+              <div className="space-y-2">
+                {metrics.byStatus.map(s => {
+                  const maxCount = Math.max(...metrics.byStatus.map(x => x.count));
+                  const barPct = maxCount > 0 ? (s.count / maxCount) * 100 : 0;
+                  const barColor = DONE_STATUSES_SET.has(s.status)
+                    ? 'bg-emerald-500/70'
+                    : IN_PROG_STATUSES_SET.has(s.status)
+                    ? 'bg-blue-500/70'
+                    : 'bg-slate-500/70';
+                  return (
+                    <div key={s.status} className="flex items-center gap-2">
+                      <span className="text-xs text-blue-300 w-32 truncate shrink-0">{s.status}</span>
+                      <div className="flex-1 h-2 bg-blue-950 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${barPct}%` }} />
+                      </div>
+                      <span className="text-xs text-blue-400 w-5 text-right shrink-0">{s.count}</span>
+                      {s.points > 0 && <span className="text-xs text-blue-600 w-10 text-right shrink-0">{s.points}SP</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {metrics && metrics.byAssignee.length > 0 && (
+            <div className="bg-blue-900/40 border border-blue-800/40 rounded-xl p-4">
+              <p className="text-xs font-semibold text-blue-300 mb-3">Kişi Bazlı Tamamlanma</p>
+              <div className="space-y-3">
+                {metrics.byAssignee.slice(0, 8).map(a => {
+                  const pct = a.total > 0 ? Math.round((a.done / a.total) * 100) : 0;
+                  return (
+                    <div key={a.name}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-blue-200 flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-blue-800 inline-flex items-center justify-center text-[9px] font-bold text-amber-300 shrink-0">
+                            {a.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+                          </span>
+                          {a.name}
+                        </span>
+                        <span className="text-xs text-blue-400">{a.done}/{a.total} <span className={pct >= 70 ? 'text-emerald-400' : pct >= 40 ? 'text-amber-400' : 'text-red-400'}>({pct}%)</span></span>
+                      </div>
+                      <div className="h-1.5 bg-blue-950 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500/70 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {metrics && metrics.byPriority.length > 0 && (
+            <div className="bg-blue-900/40 border border-blue-800/40 rounded-xl p-4">
+              <p className="text-xs font-semibold text-blue-300 mb-3">Öncelik Bazlı Tamamlanma</p>
+              <div className="space-y-2">
+                {metrics.byPriority
+                  .sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 5) - (PRIORITY_ORDER[b.priority] ?? 5))
+                  .map(p => {
+                    const pct = p.count > 0 ? Math.round((p.doneCount / p.count) * 100) : 0;
+                    const dot = PRIORITY_DOT[p.priority] ?? 'bg-slate-500';
+                    return (
+                      <div key={p.priority} className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+                        <span className="text-xs text-blue-300 w-16 shrink-0">{p.priority}</span>
+                        <div className="flex-1 h-1.5 bg-blue-950 rounded-full overflow-hidden">
+                          <div className="h-full bg-emerald-500/50 rounded-full" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-xs text-blue-500 shrink-0 w-12 text-right">{p.doneCount}/{p.count} (%{pct})</span>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          {!metrics && (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
+        </div>
+
+        {/* Right: AI Sprint Report */}
+        <div className="bg-blue-900/40 border border-blue-800/40 rounded-xl overflow-hidden flex flex-col min-h-[400px]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-blue-800/40 shrink-0">
+            <p className="text-xs font-semibold text-blue-300 flex items-center gap-1.5">
+              <span>🤖</span> AI Sprint Raporu
+            </p>
+            {report && (
+              <button
+                onClick={onCopyReport}
+                className="text-xs px-2.5 py-1 rounded border border-blue-700/50 text-blue-400 hover:border-amber-400/50 hover:text-amber-400 transition-all flex items-center gap-1.5"
+              >
+                {reportCopied ? '✓ Kopyalandı' : '📋 Kopyala'}
+              </button>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4">
+            {generatingReport && !report && (
+              <div className="flex flex-col items-center py-12 gap-3">
+                <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs text-blue-400">AI sprint verilerini analiz ediyor...</p>
+              </div>
+            )}
+
+            {!generatingReport && !report && (
+              <div className="flex flex-col items-center py-12 gap-3">
+                <p className="text-xs text-blue-400 text-center">Sprint raporu henüz oluşturulmadı.</p>
+                <button
+                  onClick={onGenerateReport}
+                  className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 rounded-lg text-xs transition-all"
+                >
+                  📊 Rapor Oluştur
+                </button>
+              </div>
+            )}
+
+            {report && (
+              <div className="space-y-4">
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                  <p className="text-xs text-white leading-relaxed">{report.summary}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-emerald-300 mb-2 flex items-center gap-1">
+                    <span>✅</span> Bu Sprint Ne Başardık?
+                  </p>
+                  <ul className="space-y-1">
+                    {report.accomplishments.map((a, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-xs text-blue-200">
+                        <span className="text-emerald-400 mt-0.5 shrink-0">•</span> {a}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-amber-300 mb-1">📈 Velocity Analizi</p>
+                  <p className="text-xs text-white">{report.velocity_analysis}</p>
+                </div>
+
+                {report.risks.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-red-300 mb-2 flex items-center gap-1">
+                      <span>⚠️</span> Riskler
+                    </p>
+                    <ul className="space-y-1">
+                      {report.risks.map((r, i) => (
+                        <li key={i} className="flex items-start gap-1.5 text-xs text-blue-200">
+                          <span className="text-red-400 mt-0.5 shrink-0">•</span> {r}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-purple-300 mb-1">🚀 Sonraki Sprint Önerisi</p>
+                  <p className="text-xs text-white">{report.next_sprint_suggestion}</p>
+                </div>
+
+                <button
+                  onClick={onGenerateReport}
+                  disabled={generatingReport}
+                  className="w-full py-2 text-xs text-blue-400 border border-blue-500/30 rounded-lg hover:bg-blue-500/10 transition-all disabled:opacity-40"
+                >
+                  {generatingReport ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <span className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
+                      Güncelleniyor...
+                    </span>
+                  ) : 'Yeniden Oluştur'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SPRINT PLANI VIEW ─────────────────────────────────────────────────────────
+
+function SprintPlanView({
+  tasks,
+  loading,
+  onReimport,
+}: {
+  tasks: SprintTask[];
+  loading: boolean;
+  onReimport: () => void;
+}) {
+  const [filter, setFilter] = useState('');
+  const [sprintFilter, setSprintFilter] = useState<string>('all');
+  const [onlyDated, setOnlyDated] = useState(false);
+  const [blokModal, setBlokModal] = useState<{ no: string; blokNedeni: string } | null>(null);
+  const [blokCozum, setBlokCozum] = useState<BlokCozumResult | null>(null);
+  const [blokLoading, setBlokLoading] = useState(false);
+
+  async function handleBlokClick(no: string, blokNedeni: string) {
+    setBlokModal({ no, blokNedeni });
+    setBlokCozum(null);
+    setBlokLoading(true);
+    try {
+      const result = await getBlokCozumOnerisi(blokNedeni, no);
+      setBlokCozum(result);
+    } finally {
+      setBlokLoading(false);
+    }
+  }
+
+  const sprints = [...new Set(tasks.map(t => t.sprint_no).filter(Boolean) as number[])].sort((a, b) => a - b);
+
+  const filtered = tasks.filter(t => {
+    if (filter && !t.no.toLowerCase().includes(filter.toLowerCase())) return false;
+    if (sprintFilter !== 'all' && String(t.sprint_no) !== sprintFilter) return false;
+    if (onlyDated && !t.tamamlanma_tarihi) return false;
+    return true;
+  });
+
+  const withDate = tasks.filter(t => t.tamamlanma_tarihi).length;
+  const withoutDate = tasks.length - withDate;
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center gap-3">
+        <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+        <span className="text-blue-400 text-sm">Sprint planı yükleniyor...</span>
+      </div>
+    );
+  }
+
+  if (tasks.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-blue-500">
+        <span className="text-4xl">📋</span>
+        <p className="text-sm">Sprint planı verisi bulunamadı.</p>
+        <p className="text-xs text-blue-600">Overvibe_Tasklar_Enriched.json dosyası proje dizininde olmalı.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-blue-800/50 bg-blue-900/10 shrink-0 flex-wrap gap-y-2">
+        {/* KPI badges */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+            ✓ {withDate} tarihli
+          </span>
+          <span className="text-xs px-2.5 py-1 rounded-full bg-slate-500/15 text-slate-400 border border-slate-500/25">
+            — {withoutDate} bekliyor
+          </span>
+          <span className="text-xs text-blue-500">{tasks.length} toplam</span>
+        </div>
+
+        {/* Search */}
+        <div className="relative">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            placeholder="No ara (ICTREQ-...)"
+            className="pl-8 pr-3 py-1.5 bg-blue-950 border border-blue-700/50 rounded-lg text-xs text-white placeholder-blue-600 focus:outline-none focus:border-amber-400 w-44"
+          />
+        </div>
+
+        {/* Sprint filter */}
+        <select
+          value={sprintFilter}
+          onChange={e => setSprintFilter(e.target.value)}
+          className="bg-blue-950 border border-blue-700/50 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+        >
+          <option value="all">Tüm Sprintler</option>
+          <option value="null">Sprint Atanmamış</option>
+          {sprints.map(s => (
+            <option key={s} value={String(s)}>Sprint {s}</option>
+          ))}
+        </select>
+
+        {/* Only dated toggle */}
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={onlyDated}
+            onChange={e => setOnlyDated(e.target.checked)}
+            className="accent-emerald-400"
+          />
+          <span className="text-xs text-blue-300">Sadece tarihli</span>
+        </label>
+
+        <span className="text-xs text-blue-600">{filtered.length} gösterilen</span>
+
+        <button
+          onClick={onReimport}
+          className="ml-auto text-xs px-3 py-1.5 border border-blue-700/50 hover:border-amber-400/50 text-blue-400 hover:text-amber-400 rounded-lg transition-all flex items-center gap-1.5"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          Yenile
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead className="sticky top-0 bg-blue-950 z-10">
+            <tr className="border-b border-blue-800/50">
+              <th className="text-left px-4 py-2.5 text-blue-400 font-medium w-36">No</th>
+              <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-20">Sprint</th>
+              <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-28">Backlog Giriş</th>
+              <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-28">Sprint Başlangıç</th>
+              <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-28">Sprint Bitiş</th>
+              <th className="text-center px-2 py-2.5 text-blue-400 font-medium w-32">Tamamlanma Tarihi</th>
+              <th className="text-left px-2 py-2.5 text-blue-400 font-medium w-px whitespace-nowrap">Blok Nedeni</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((task, idx) => {
+              const hasDone = Boolean(task.tamamlanma_tarihi);
+              const isLate = hasDone && task.sprint_bitis && task.tamamlanma_tarihi
+                ? task.tamamlanma_tarihi > task.sprint_bitis
+                : false;
+              return (
+                <tr
+                  key={task.id}
+                  className={`border-b border-blue-800/20 transition-colors ${
+                    isLate
+                      ? 'bg-red-900/15 hover:bg-red-900/25'
+                      : hasDone
+                      ? 'bg-emerald-900/10 hover:bg-emerald-900/20'
+                      : idx % 2 === 0
+                      ? 'bg-blue-900/15 hover:bg-blue-900/30'
+                      : 'hover:bg-blue-900/20'
+                  }`}
+                >
+                  <td className="px-4 py-2.5">
+                    <span className="font-mono text-amber-400/80 text-xs whitespace-nowrap">{task.no}</span>
+                  </td>
+                  <td className="px-2 py-2.5 text-center">
+                    {task.sprint_no != null ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/20">
+                        {task.sprint_no}
+                      </span>
+                    ) : (
+                      <span className="text-blue-700">—</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2.5 text-center">
+                    <span className="text-blue-400 text-xs">{task.backlog_giris_tarihi ?? '—'}</span>
+                  </td>
+                  <td className="px-2 py-2.5 text-center">
+                    <span className="text-blue-400 text-xs">{task.sprint_baslangic ?? '—'}</span>
+                  </td>
+                  <td className="px-2 py-2.5 text-center">
+                    <span className="text-blue-400 text-xs">{task.sprint_bitis ?? '—'}</span>
+                  </td>
+                  <td className="px-2 py-2.5 text-center">
+                    {hasDone ? (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap border ${
+                        isLate
+                          ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                          : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      }`}>
+                        {isLate ? '⚠ ' : '✓ '}{task.tamamlanma_tarihi}
+                      </span>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        Devam ediyor
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2.5 w-px whitespace-nowrap">
+                    {task.blok_nedeni ? (
+                      <button
+                        onClick={() => handleBlokClick(task.no, task.blok_nedeni!)}
+                        className="text-xs px-2 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/25 whitespace-nowrap hover:bg-red-500/30 hover:border-red-400/50 transition-all cursor-pointer"
+                        title="AI çözüm önerilerini gör"
+                      >
+                        {task.blok_nedeni} ✨
+                      </button>
+                    ) : (
+                      <span className="text-blue-800 text-xs">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ─── BLOK NEDENİ ÇÖZÜM MODAL ─────────────────────────────────── */}
+      {blokModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget && !blokLoading) { setBlokModal(null); setBlokCozum(null); } }}
+        >
+          <div className="bg-blue-900 border border-blue-700/60 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden">
+            <div className="flex items-start justify-between px-6 py-4 border-b border-blue-800/50">
+              <div>
+                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>✨</span> AI Blokaj Çözüm Önerileri
+                </h2>
+                <p className="text-xs text-amber-300 mt-1 font-mono">{blokModal.no}</p>
+                <span className="inline-block mt-1.5 text-xs px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">
+                  {blokModal.blokNedeni}
+                </span>
+              </div>
+              {!blokLoading && (
+                <button
+                  onClick={() => { setBlokModal(null); setBlokCozum(null); }}
+                  className="text-blue-400 hover:text-white text-xl shrink-0 ml-4"
+                >✕</button>
+              )}
+            </div>
+
+            <div className="px-6 py-5">
+              {blokLoading && (
+                <div className="flex flex-col items-center py-10 gap-3">
+                  <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-xs text-blue-400">AI blokaj analiz ediyor ve çözüm üretiyor...</p>
+                </div>
+              )}
+
+              {blokCozum && !blokLoading && (
+                <div className="space-y-4">
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3">
+                    <p className="text-xs text-blue-200 leading-relaxed">{blokCozum.ozet}</p>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {blokCozum.oneriler.map((o, i) => (
+                      <div key={i} className="bg-blue-950/60 border border-blue-800/40 rounded-xl px-4 py-3 flex gap-3">
+                        <span className="w-5 h-5 rounded-full bg-amber-400/20 text-amber-300 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          {i + 1}
+                        </span>
+                        <div>
+                          <p className="text-xs font-semibold text-white mb-0.5">{o.baslik}</p>
+                          <p className="text-xs text-blue-400 leading-relaxed">{o.aciklama}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => { setBlokCozum(null); handleBlokClick(blokModal.no, blokModal.blokNedeni); }}
+                    className="w-full py-2 text-xs text-blue-400 border border-blue-500/30 rounded-lg hover:bg-blue-500/10 transition-all"
+                  >
+                    Yeniden Üret
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

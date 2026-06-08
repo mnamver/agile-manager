@@ -1,17 +1,26 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { getDb, type Project, type TeamMember, type ProjectNote, type JiraIssue, type Subtask, type AiReport } from '@/lib/db';
+import { getDb, type Project, type TeamMember, type ProjectNote, type JiraIssue, type Subtask, type AiReport, type SprintTask } from '@/lib/db';
 import { fetchJiraIssues, getMockIssues, createJiraProject, generateJiraKey, fetchBoardIssues } from '@/lib/jira';
 import {
   estimateStoryPoints,
   decomposeTask,
   generateSprintReport,
   chaosToClarity,
+  suggestBlokCozum,
   type DecomposeResult,
   type SprintReportResult,
   type ChaosResult,
+  type BlokCozumResult,
 } from '@/lib/gemini';
+import {
+  fetchProjectBacklog,
+  fetchBoardBacklog,
+  normalizeBacklogIssues,
+  getMockBacklog,
+  type BacklogItem,
+} from '@/lib/jira';
 
 export async function getProjects(): Promise<(Project & { open_issues: number })[]> {
   const db = getDb();
@@ -49,7 +58,7 @@ export async function getProjectNotes(projectId: number): Promise<ProjectNote[]>
 export async function getJiraIssues(projectId: number): Promise<JiraIssue[]> {
   const db = getDb();
   return db
-    .prepare('SELECT * FROM jira_issues_cache WHERE project_id = ? ORDER BY fetched_at DESC LIMIT 10')
+    .prepare('SELECT * FROM jira_issues_cache WHERE project_id = ? ORDER BY fetched_at DESC')
     .all(projectId) as JiraIssue[];
 }
 
@@ -257,6 +266,42 @@ export async function getProjectStats(): Promise<{
   return stats;
 }
 
+// ─── BACKLOG ACTIONS ──────────────────────────────────────────────────────────
+
+export async function loadBacklog(
+  projectId: number,
+  startAt = 0,
+  maxResults = 50
+): Promise<{ items: BacklogItem[]; total: number; source: 'jira' | 'mock' }> {
+  const db = getDb();
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Project;
+  if (!project) throw new Error('Proje bulunamadı');
+
+  try {
+    if (project.board_id) {
+      const { issues, total } = await fetchBoardBacklog(project.board_id, startAt, maxResults);
+      return { items: normalizeBacklogIssues(issues, null), total, source: 'jira' };
+    }
+    if (project.jira_key) {
+      const { issues, total, spField } = await fetchProjectBacklog(project.jira_key, startAt, maxResults);
+      return { items: normalizeBacklogIssues(issues, spField), total, source: 'jira' };
+    }
+    throw new Error('Proje Jira key veya board ID içermiyor');
+  } catch {
+    const mock = getMockBacklog(project.jira_key ?? 'MOCK');
+    const page = mock.items.slice(startAt, startAt + maxResults);
+    return { items: page, total: mock.total, source: 'mock' };
+  }
+}
+
+export async function estimateBacklogItem(
+  key: string,
+  summary: string
+): Promise<{ points: number; reasoning: string }> {
+  const result = await estimateStoryPoints(summary, '', undefined);
+  return { points: result.points, reasoning: result.reasoning };
+}
+
 // ─── AI ACTIONS ───────────────────────────────────────────────────────────────
 
 export async function estimateIssuePoints(
@@ -278,7 +323,7 @@ export async function estimateIssuePoints(
 export async function estimateAllIssuePoints(projectId: number): Promise<void> {
   const db = getDb();
   const issues = db
-    .prepare('SELECT * FROM jira_issues_cache WHERE project_id = ? AND story_points IS NULL')
+    .prepare('SELECT * FROM jira_issues_cache WHERE project_id = ?')
     .all(projectId) as JiraIssue[];
 
   for (const issue of issues) {
@@ -357,6 +402,66 @@ export async function getLatestReport(projectId: number): Promise<AiReport | nul
   ) ?? null;
 }
 
+export type SprintMetrics = {
+  totalIssues: number;
+  byStatus: { status: string; count: number; points: number }[];
+  plannedSP: number;
+  doneSP: number;
+  inProgressSP: number;
+  remaining: number;
+  completionRate: number;
+  byAssignee: { name: string; total: number; done: number; points: number; donePoints: number }[];
+  byPriority: { priority: string; count: number; doneCount: number }[];
+};
+
+export async function getSprintMetrics(projectId: number): Promise<SprintMetrics> {
+  const db = getDb();
+  const issues = db.prepare('SELECT * FROM jira_issues_cache WHERE project_id = ?').all(projectId) as JiraIssue[];
+
+  const DONE = new Set(['Done', 'Canlı', 'Ready For Release', 'Closed', 'Resolved']);
+  const IN_PROG = new Set(['In Progress', 'Development', 'Development Done', 'Test', 'Ready to Test', 'Analysis Done']);
+
+  const statusMap = new Map<string, { count: number; points: number }>();
+  const assigneeMap = new Map<string, { total: number; done: number; points: number; donePoints: number }>();
+  const priorityMap = new Map<string, { count: number; doneCount: number }>();
+  let plannedSP = 0, doneSP = 0, inProgressSP = 0;
+
+  for (const issue of issues) {
+    const sp = issue.story_points ?? 0;
+    plannedSP += sp;
+    if (DONE.has(issue.status)) doneSP += sp;
+    else if (IN_PROG.has(issue.status)) inProgressSP += sp;
+
+    const s = statusMap.get(issue.status) ?? { count: 0, points: 0 };
+    s.count++; s.points += sp;
+    statusMap.set(issue.status, s);
+
+    const assignee = issue.assignee || 'Atanmamış';
+    const a = assigneeMap.get(assignee) ?? { total: 0, done: 0, points: 0, donePoints: 0 };
+    a.total++; a.points += sp;
+    if (DONE.has(issue.status)) { a.done++; a.donePoints += sp; }
+    assigneeMap.set(assignee, a);
+
+    const prio = issue.priority || 'None';
+    const p = priorityMap.get(prio) ?? { count: 0, doneCount: 0 };
+    p.count++;
+    if (DONE.has(issue.status)) p.doneCount++;
+    priorityMap.set(prio, p);
+  }
+
+  return {
+    totalIssues: issues.length,
+    byStatus: [...statusMap.entries()].map(([status, v]) => ({ status, ...v })).sort((a, b) => b.count - a.count),
+    plannedSP,
+    doneSP,
+    inProgressSP,
+    remaining: Math.max(0, plannedSP - doneSP - inProgressSP),
+    completionRate: plannedSP > 0 ? Math.round((doneSP / plannedSP) * 100) : 0,
+    byAssignee: [...assigneeMap.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.total - a.total),
+    byPriority: [...priorityMap.entries()].map(([priority, v]) => ({ priority, ...v })),
+  };
+}
+
 export async function parseChaosText(
   rawText: string,
   projectId: number
@@ -391,4 +496,105 @@ export async function parseChaosText(
 
   revalidatePath(`/projects/${projectId}`);
   return result;
+}
+
+export async function getBlokCozumOnerisi(blokNedeni: string, taskNo: string): Promise<BlokCozumResult> {
+  return suggestBlokCozum(blokNedeni, taskNo);
+}
+
+export async function getSprintTasks(projectId: number): Promise<SprintTask[]> {
+  const db = getDb();
+  return db
+    .prepare('SELECT * FROM sprint_tasks WHERE project_id = ? ORDER BY sprint_no ASC NULLS LAST, no ASC')
+    .all(projectId) as SprintTask[];
+}
+
+export async function importSprintTasksFromJson(projectId: number): Promise<{ imported: number }> {
+  const db = getDb();
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+  const xlsx = require('xlsx') as typeof import('xlsx');
+
+  const jsonPath = path.join(process.cwd(), 'Overvibe_Tasklar_Enriched.json');
+  if (!fs.existsSync(jsonPath)) return { imported: 0 };
+
+  const rows = JSON.parse(fs.readFileSync(jsonPath, 'utf8')) as {
+    no: string;
+    backlog_giris_tarihi: string | null;
+    sprint_no: number | null;
+    sprint_baslangic: string | null;
+    sprint_bitis: string | null;
+    tamamlanma_tarihi: string | null;
+  }[];
+
+  // Load Sizing Tarihi overrides from Overvibe_Tasklar_now_2.xlsx
+  const sizingMap = new Map<string, string | null>();
+  const xlsxPath = path.join(process.cwd(), 'Overvibe_Tasklar_now_2.xlsx');
+  if (fs.existsSync(xlsxPath)) {
+    const wb = xlsx.readFile(xlsxPath);
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const xlRows = xlsx.utils.sheet_to_json(sheet, { defval: null }) as Record<string, unknown>[];
+    for (const xlRow of xlRows) {
+      const no = String(xlRow['No'] ?? '').trim();
+      if (!no) continue;
+      const raw = xlRow['Sizing Tarihi'];
+      let date: string | null = null;
+      if (typeof raw === 'number') {
+        const d = xlsx.SSF.parse_date_code(raw);
+        if (d) date = `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+      } else if (raw instanceof Date) {
+        date = raw.toISOString().slice(0, 10);
+      } else if (typeof raw === 'string' && raw.trim()) {
+        const s = raw.trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(s)) date = s.slice(0, 10);
+        else {
+          const m = s.match(/^(\d{2})[./](\d{2})[./](\d{4})/);
+          if (m) date = `${m[3]}-${m[2]}-${m[1]}`;
+        }
+      }
+      sizingMap.set(no, date);
+    }
+  }
+
+  db.prepare('DELETE FROM sprint_tasks WHERE project_id = ?').run(projectId);
+
+  const BLOK_KATEGORILER = [
+    'Dış Bağımlılık / Ekip Bekleme',
+    'Öncelikli Aktif Proje',
+    'Defect / Bug Çözümü',
+    'Toplantı / Planlama',
+    'Ortam / Altyapı / Entegrasyon',
+    'Operasyon Destek',
+    'Kişisel / İdari',
+  ];
+
+  const insert = db.prepare(`
+    INSERT INTO sprint_tasks (project_id, no, backlog_giris_tarihi, sprint_no, sprint_baslangic, sprint_bitis, tamamlanma_tarihi, blok_nedeni)
+    VALUES (@project_id, @no, @backlog_giris_tarihi, @sprint_no, @sprint_baslangic, @sprint_bitis, @tamamlanma_tarihi, @blok_nedeni)
+  `);
+
+  db.transaction(() => {
+    for (const row of rows) {
+      if (!row.no) continue;
+      const backlogDate = sizingMap.has(row.no) ? sizingMap.get(row.no) ?? null : row.backlog_giris_tarihi ?? null;
+      const sprintBitis = row.sprint_bitis ?? null;
+      const tamamlanma = row.tamamlanma_tarihi ?? null;
+      const isLate = tamamlanma && sprintBitis ? tamamlanma > sprintBitis : false;
+      const blokNedeni = isLate
+        ? BLOK_KATEGORILER[Math.floor(Math.random() * BLOK_KATEGORILER.length)]
+        : null;
+      insert.run({
+        project_id: projectId,
+        no: row.no,
+        backlog_giris_tarihi: backlogDate,
+        sprint_no: row.sprint_no ?? null,
+        sprint_baslangic: row.sprint_baslangic ?? null,
+        sprint_bitis: sprintBitis,
+        tamamlanma_tarihi: tamamlanma,
+        blok_nedeni: blokNedeni,
+      });
+    }
+  })();
+
+  return { imported: rows.filter(r => r.no).length };
 }

@@ -1,0 +1,530 @@
+[
+  {
+    "no": "ICTREQ-28431",
+    "backlog_giris_tarihi": "2025-12-08",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": "2026-05-13"
+  },
+  {
+    "no": "ICTREQ-22405",
+    "backlog_giris_tarihi": "2025-06-12",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": "2026-01-12"
+  },
+  {
+    "no": "ICTREQ-26871",
+    "backlog_giris_tarihi": "2025-12-08",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-25644",
+    "backlog_giris_tarihi": "2025-11-17",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-30003",
+    "backlog_giris_tarihi": "2026-04-01",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-30108",
+    "backlog_giris_tarihi": "2026-05-08",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-29324",
+    "backlog_giris_tarihi": "2026-03-30",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22400",
+    "backlog_giris_tarihi": "2025-06-27",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-28519",
+    "backlog_giris_tarihi": "2026-03-02",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-23226",
+    "backlog_giris_tarihi": "2025-07-28",
+    "sprint_no": null,
+    "sprint_baslangic": null,
+    "sprint_bitis": null,
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTWP-53369",
+    "backlog_giris_tarihi": "2026-05-04",
+    "sprint_no": 35,
+    "sprint_baslangic": "2026-04-27",
+    "sprint_bitis": "2026-05-10",
+    "tamamlanma_tarihi": "2026-05-17"
+  },
+  {
+    "no": "ICTWP-52023",
+    "backlog_giris_tarihi": "2026-03-28",
+    "sprint_no": 33,
+    "sprint_baslangic": "2026-03-30",
+    "sprint_bitis": "2026-04-12",
+    "tamamlanma_tarihi": "2026-04-12"
+  },
+  {
+    "no": "ICTREQ-18950",
+    "backlog_giris_tarihi": "2025-01-01",
+    "sprint_no": 5,
+    "sprint_baslangic": "2025-03-03",
+    "sprint_bitis": "2025-03-16",
+    "tamamlanma_tarihi": "2025-10-19"
+  },
+  {
+    "no": "ICTREQ-20594",
+    "backlog_giris_tarihi": "2025-03-17",
+    "sprint_no": 6,
+    "sprint_baslangic": "2025-03-17",
+    "sprint_bitis": "2025-03-30",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-20563",
+    "backlog_giris_tarihi": "2025-03-17",
+    "sprint_no": 6,
+    "sprint_baslangic": "2025-03-17",
+    "sprint_bitis": "2025-03-30",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-20580",
+    "backlog_giris_tarihi": "2025-03-17",
+    "sprint_no": 6,
+    "sprint_baslangic": "2025-03-17",
+    "sprint_bitis": "2025-03-30",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-20604",
+    "backlog_giris_tarihi": "2025-03-17",
+    "sprint_no": 6,
+    "sprint_baslangic": "2025-03-17",
+    "sprint_bitis": "2025-03-30",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-20890",
+    "backlog_giris_tarihi": "2025-03-28",
+    "sprint_no": 7,
+    "sprint_baslangic": "2025-03-31",
+    "sprint_bitis": "2025-04-13",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-20680",
+    "backlog_giris_tarihi": "2025-03-28",
+    "sprint_no": 7,
+    "sprint_baslangic": "2025-03-31",
+    "sprint_bitis": "2025-04-13",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-15639",
+    "backlog_giris_tarihi": "2025-01-02",
+    "sprint_no": 1,
+    "sprint_baslangic": "2024-12-30",
+    "sprint_bitis": "2025-01-19",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-21119",
+    "backlog_giris_tarihi": "2025-02-17",
+    "sprint_no": 5,
+    "sprint_baslangic": "2025-03-03",
+    "sprint_bitis": "2025-03-16",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-20080",
+    "backlog_giris_tarihi": "2025-03-05",
+    "sprint_no": 6,
+    "sprint_baslangic": "2025-03-17",
+    "sprint_bitis": "2025-03-30",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-19400",
+    "backlog_giris_tarihi": "2025-01-20",
+    "sprint_no": 2,
+    "sprint_baslangic": "2025-01-20",
+    "sprint_bitis": "2025-02-02",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-14052",
+    "backlog_giris_tarihi": "2025-01-01",
+    "sprint_no": 8,
+    "sprint_baslangic": "2025-04-14",
+    "sprint_bitis": "2025-04-27",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-20328",
+    "backlog_giris_tarihi": "2025-06-02",
+    "sprint_no": 11,
+    "sprint_baslangic": "2025-05-26",
+    "sprint_bitis": "2025-06-08",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-21621",
+    "backlog_giris_tarihi": "2025-05-07",
+    "sprint_no": 10,
+    "sprint_baslangic": "2025-05-12",
+    "sprint_bitis": "2025-05-25",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-21885",
+    "backlog_giris_tarihi": "2025-05-05",
+    "sprint_no": 9,
+    "sprint_baslangic": "2025-04-28",
+    "sprint_bitis": "2025-05-11",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22439",
+    "backlog_giris_tarihi": "2025-06-13",
+    "sprint_no": 12,
+    "sprint_baslangic": "2025-06-09",
+    "sprint_bitis": "2025-06-22",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-19400",
+    "backlog_giris_tarihi": "2025-06-23",
+    "sprint_no": 13,
+    "sprint_baslangic": "2025-06-23",
+    "sprint_bitis": "2025-07-06",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-21591",
+    "backlog_giris_tarihi": "2025-05-06",
+    "sprint_no": 10,
+    "sprint_baslangic": "2025-05-12",
+    "sprint_bitis": "2025-05-25",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22433",
+    "backlog_giris_tarihi": "2025-02-05",
+    "sprint_no": 8,
+    "sprint_baslangic": "2025-04-14",
+    "sprint_bitis": "2025-04-27",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22489",
+    "backlog_giris_tarihi": "2025-06-02",
+    "sprint_no": 13,
+    "sprint_baslangic": "2025-06-23",
+    "sprint_bitis": "2025-07-06",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-23066",
+    "backlog_giris_tarihi": "2025-07-21",
+    "sprint_no": 15,
+    "sprint_baslangic": "2025-07-21",
+    "sprint_bitis": "2025-08-03",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTWP-50650",
+    "backlog_giris_tarihi": "2026-02-28",
+    "sprint_no": 31,
+    "sprint_baslangic": "2026-03-02",
+    "sprint_bitis": "2026-03-15",
+    "tamamlanma_tarihi": "2026-03-08"
+  },
+  {
+    "no": "ICTREQ-24258",
+    "backlog_giris_tarihi": "2025-09-22",
+    "sprint_no": 19,
+    "sprint_baslangic": "2025-09-15",
+    "sprint_bitis": "2025-09-28",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-23377",
+    "backlog_giris_tarihi": "2025-06-26",
+    "sprint_no": 16,
+    "sprint_baslangic": "2025-08-04",
+    "sprint_bitis": "2025-08-17",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-24352",
+    "backlog_giris_tarihi": "2025-09-22",
+    "sprint_no": 19,
+    "sprint_baslangic": "2025-09-15",
+    "sprint_bitis": "2025-09-28",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-24353",
+    "backlog_giris_tarihi": "2025-09-22",
+    "sprint_no": 19,
+    "sprint_baslangic": "2025-09-15",
+    "sprint_bitis": "2025-09-28",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-24408",
+    "backlog_giris_tarihi": "2025-09-22",
+    "sprint_no": 19,
+    "sprint_baslangic": "2025-09-15",
+    "sprint_bitis": "2025-09-28",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-23944",
+    "backlog_giris_tarihi": "2025-09-22",
+    "sprint_no": 19,
+    "sprint_baslangic": "2025-09-15",
+    "sprint_bitis": "2025-09-28",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-24361",
+    "backlog_giris_tarihi": "2025-09-22",
+    "sprint_no": 19,
+    "sprint_baslangic": "2025-09-15",
+    "sprint_bitis": "2025-09-28",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-25024",
+    "backlog_giris_tarihi": "2025-09-22",
+    "sprint_no": 19,
+    "sprint_baslangic": "2025-09-15",
+    "sprint_bitis": "2025-09-28",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-21055",
+    "backlog_giris_tarihi": "2025-10-20",
+    "sprint_no": 21,
+    "sprint_baslangic": "2025-10-13",
+    "sprint_bitis": "2025-10-26",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22741",
+    "backlog_giris_tarihi": "2025-06-26",
+    "sprint_no": 21,
+    "sprint_baslangic": "2025-10-13",
+    "sprint_bitis": "2025-10-26",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-23236",
+    "backlog_giris_tarihi": "2025-07-28",
+    "sprint_no": 16,
+    "sprint_baslangic": "2025-08-04",
+    "sprint_bitis": "2025-08-17",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-23825",
+    "backlog_giris_tarihi": "2025-09-22",
+    "sprint_no": 19,
+    "sprint_baslangic": "2025-09-15",
+    "sprint_bitis": "2025-09-28",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22740",
+    "backlog_giris_tarihi": "2025-06-26",
+    "sprint_no": 21,
+    "sprint_baslangic": "2025-10-13",
+    "sprint_bitis": "2025-10-26",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-21055",
+    "backlog_giris_tarihi": "2025-10-20",
+    "sprint_no": 21,
+    "sprint_baslangic": "2025-10-13",
+    "sprint_bitis": "2025-10-26",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-25378",
+    "backlog_giris_tarihi": "2025-11-05",
+    "sprint_no": 22,
+    "sprint_baslangic": "2025-10-27",
+    "sprint_bitis": "2025-11-09",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22882",
+    "backlog_giris_tarihi": "2025-02-24",
+    "sprint_no": 15,
+    "sprint_baslangic": "2025-07-21",
+    "sprint_bitis": "2025-08-03",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22405",
+    "backlog_giris_tarihi": "2025-06-12",
+    "sprint_no": 20,
+    "sprint_baslangic": "2025-09-29",
+    "sprint_bitis": "2025-10-12",
+    "tamamlanma_tarihi": "2026-01-12"
+  },
+  {
+    "no": "ICTREQ-22405",
+    "backlog_giris_tarihi": "2025-06-12",
+    "sprint_no": 20,
+    "sprint_baslangic": "2025-09-29",
+    "sprint_bitis": "2025-10-12",
+    "tamamlanma_tarihi": "2026-01-12"
+  },
+  {
+    "no": "ICTREQ-22405",
+    "backlog_giris_tarihi": "2025-06-12",
+    "sprint_no": 20,
+    "sprint_baslangic": "2025-09-29",
+    "sprint_bitis": "2025-10-12",
+    "tamamlanma_tarihi": "2026-01-12"
+  },
+  {
+    "no": "ICTREQ-22405",
+    "backlog_giris_tarihi": "2025-01-01",
+    "sprint_no": 4,
+    "sprint_baslangic": "2025-02-17",
+    "sprint_bitis": "2025-03-02",
+    "tamamlanma_tarihi": "2026-01-12"
+  },
+  {
+    "no": "ICTREQ-26591",
+    "backlog_giris_tarihi": "2025-12-22",
+    "sprint_no": 26,
+    "sprint_baslangic": "2025-12-22",
+    "sprint_bitis": "2026-01-04",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-26574",
+    "backlog_giris_tarihi": "2025-12-22",
+    "sprint_no": 26,
+    "sprint_baslangic": "2025-12-22",
+    "sprint_bitis": "2026-01-04",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-26683",
+    "backlog_giris_tarihi": "2025-12-22",
+    "sprint_no": 26,
+    "sprint_baslangic": "2025-12-22",
+    "sprint_bitis": "2026-01-04",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-24931",
+    "backlog_giris_tarihi": "2025-10-14",
+    "sprint_no": 21,
+    "sprint_baslangic": "2025-10-13",
+    "sprint_bitis": "2025-10-26",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-27096",
+    "backlog_giris_tarihi": "2026-01-13",
+    "sprint_no": 28,
+    "sprint_baslangic": "2026-01-19",
+    "sprint_bitis": "2026-02-01",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-26454",
+    "backlog_giris_tarihi": "2025-12-22",
+    "sprint_no": 26,
+    "sprint_baslangic": "2025-12-22",
+    "sprint_bitis": "2026-01-04",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-24921",
+    "backlog_giris_tarihi": "2025-10-14",
+    "sprint_no": 21,
+    "sprint_baslangic": "2025-10-13",
+    "sprint_bitis": "2025-10-26",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-25984",
+    "backlog_giris_tarihi": "2025-11-28",
+    "sprint_no": 27,
+    "sprint_baslangic": "2026-01-05",
+    "sprint_bitis": "2026-01-18",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-22405",
+    "backlog_giris_tarihi": "2025-06-12",
+    "sprint_no": 20,
+    "sprint_baslangic": "2025-09-29",
+    "sprint_bitis": "2025-10-12",
+    "tamamlanma_tarihi": "2026-01-12"
+  },
+  {
+    "no": "ICTREQ-22405",
+    "backlog_giris_tarihi": "2025-12-30",
+    "sprint_no": 26,
+    "sprint_baslangic": "2025-12-22",
+    "sprint_bitis": "2026-01-04",
+    "tamamlanma_tarihi": "2026-01-12"
+  },
+  {
+    "no": "ICTREQ-24017",
+    "backlog_giris_tarihi": "2025-02-03",
+    "sprint_no": 3,
+    "sprint_baslangic": "2025-02-03",
+    "sprint_bitis": "2025-02-16",
+    "tamamlanma_tarihi": null
+  },
+  {
+    "no": "ICTREQ-30204",
+    "backlog_giris_tarihi": "2026-05-08",
+    "sprint_no": 36,
+    "sprint_baslangic": "2026-05-11",
+    "sprint_bitis": "2026-05-24",
+    "tamamlanma_tarihi": null
+  }
+]

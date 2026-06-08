@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
-const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 async function askGemini(prompt: string): Promise<string> {
   const result = await model.generateContent(prompt);
@@ -248,6 +248,114 @@ export type ChaosResult = {
   sprint_feasibility: string;
   total_points: number;
 };
+
+export type BlokCozum = {
+  baslik: string;
+  aciklama: string;
+};
+
+export type BlokCozumResult = {
+  ozet: string;
+  oneriler: BlokCozum[];
+};
+
+function mockBlokCozum(blokNedeni: string): BlokCozumResult {
+  const map: Record<string, BlokCozumResult> = {
+    'Dış Bağımlılık / Ekip Bekleme': {
+      ozet: 'Dış bağımlılık kaynaklı gecikmeler için proaktif takip ve eskalasyon mekanizması kurulmalı.',
+      oneriler: [
+        { baslik: 'Bağımlılık Matrisi Oluştur', aciklama: 'Tüm dış bağımlılıkları ve beklenen teslim tarihlerini görünür bir matrise taşı.' },
+        { baslik: 'Haftalık Senkronizasyon Toplantısı', aciklama: 'Bağımlı ekiplerle haftalık durum toplantısı koy, gecikme erken tespit edilsin.' },
+        { baslik: 'Eskalasyon Yolu Belirle', aciklama: '48 saat yanıt gelmezse yönetici seviyesinde eskalasyon protokolü devreye girsin.' },
+        { baslik: 'Paralel Çalışma Planı', aciklama: 'Bağımlılık çözülene kadar bağımsız alt görevleri öne al, boş beklemeyi önle.' },
+      ],
+    },
+    'Öncelikli Aktif Proje': {
+      ozet: 'Kaynak çakışması yönetilmeli; sprint planlamasında kapasite gerçekçi ayrılmalı.',
+      oneriler: [
+        { baslik: 'Kapasite Planlaması Güncelle', aciklama: 'Aktif projenin kaplama oranını sprint planına yansıt, over-commitment önle.' },
+        { baslik: 'Öncelik Sıralaması Netleştir', aciklama: 'Product Owner ile hangi projenin önde geldiğini yazılı olarak belgele.' },
+        { baslik: 'Kısmi Teslim Stratejisi', aciklama: 'Büyük görevi parçala; bir kısmını mevcut sprint\'te teslim et.' },
+        { baslik: 'Kaynak Takviyesi Talep Et', aciklama: 'Sürekli çakışma varsa ek kaynak veya deadline revizyonu için yönetimi bilgilendir.' },
+      ],
+    },
+    'Defect / Bug Çözümü': {
+      ozet: 'Bug kaynaklı blokajlar için teknik borç yönetimi ve root-cause analizi önceliklendirilmeli.',
+      oneriler: [
+        { baslik: 'Root Cause Analizi Yap', aciklama: 'Aynı bug tekrarlanıyorsa altta yatan tasarım sorununu tespit et ve teknik borç olarak kaydet.' },
+        { baslik: 'Bug Triaj Süreci Kur', aciklama: 'Her sprint başında açık bug\'ları öncelik sırasına göre sırala, kritiklere önce girilsin.' },
+        { baslik: 'Test Otomasyonu Kapsamını Genişlet', aciklama: 'Kritik iş akışlarına regresyon testi ekle, aynı bug\'ın tekrarlanmasını önle.' },
+        { baslik: 'Hotfix Branching Stratejisi', aciklama: 'Üretim etkileyen bug\'lar için hotfix süreci belgele ve hızlandır.' },
+      ],
+    },
+    'Toplantı / Planlama': {
+      ozet: 'Toplantı yükü geliştirme kapasitesini azaltıyor; zaman optimizasyonu yapılmalı.',
+      oneriler: [
+        { baslik: 'Toplantı Denetimi Yap', aciklama: 'Haftalık toplantıların zorunluluk/katılım kriterlerini gözden geçir, gereksizleri iptal et.' },
+        { baslik: 'Asenkron İletişimi Teşvik Et', aciklama: 'Durum güncellemeleri için Slack/Confluence tercih et, toplantı sayısını düşür.' },
+        { baslik: 'Geliştirici Bloğu Koru', aciklama: 'Günde en az 4 saatlik kesintisiz geliştirme zamanı garantile.' },
+        { baslik: 'Sprint Kapasitesini Gerçekçi Hesapla', aciklama: 'Toplantı süresini sprint kapasitesine dahil ederek story point taahhüdünü ayarla.' },
+      ],
+    },
+    'Ortam / Altyapı / Entegrasyon': {
+      ozet: 'Altyapı sorunları tekrarlanıyorsa kalıcı çözüm üretilmeli, geçici yamalardan kaçınılmalı.',
+      oneriler: [
+        { baslik: 'Ortam Sağlık Kontrol Listesi', aciklama: 'Sprint başında ortam hazırlık kontrolü yap; eksikler önceden tespit edilsin.' },
+        { baslik: 'Infrastructure as Code Uygula', aciklama: 'Ortam kurulumunu otomasyona al; her seferinde sıfırdan kurulum riskini ortadan kaldır.' },
+        { baslik: 'Entegrasyon Test Ortamı Ayır', aciklama: 'Entegrasyon testleri için izole bir sandbox ortamı oluştur.' },
+        { baslik: 'SLA Takibi Başlat', aciklama: 'Altyapı olayları için SLA tanımla, yinelenen sorunları metriklerle izle.' },
+      ],
+    },
+    'Operasyon Destek': {
+      ozet: 'Geliştirme kapasitesini erode eden operasyon yükü için yapısal önlemler alınmalı.',
+      oneriler: [
+        { baslik: 'Operasyon Rotasyonu Kur', aciklama: 'Destek görevlerini takım içinde döngüsel paylaştır; tek kişi sürekli kesilmesin.' },
+        { baslik: 'Runbook Oluştur', aciklama: 'Tekrarlayan operasyon görevlerini dokümante et; herkes kılavuza bakarak çözebilsin.' },
+        { baslik: 'Otomasyon Önceliği Ver', aciklama: 'Manuel tekrarlayan operasyon adımlarını otomasyona al, uzun vadede efor azalt.' },
+        { baslik: 'Operasyon Süresini Sprint\'e Yansıt', aciklama: 'Tarihsel operasyon yükünü ölç ve sprint kapasitesini buna göre planla.' },
+      ],
+    },
+    'Kişisel / İdari': {
+      ozet: 'Kişisel ve idari nedenli gecikmeler için önceden bildirim ve yedekleme planı kritik.',
+      oneriler: [
+        { baslik: 'Bilgi Paylaşımı Artır', aciklama: 'Kritik görevlerde ikinci bir kişiyi teknik olarak hazırla; tek nokta bağımlılığı ortadan kalksın.' },
+        { baslik: 'Önceden Bildirim Kültürü', aciklama: 'Planlı izin ve idari görevler sprint planlamasında önceden görünür olsun.' },
+        { baslik: 'Yedekleme Planı Belirle', aciklama: 'Her kritik görev için bir yedek atanan kişi tanımla.' },
+        { baslik: 'Kapasite Tampon Bırak', aciklama: 'Sprint kapasitesine %10-15 tampon ekle; beklenmedik kişisel durumlara esneklik sağla.' },
+      ],
+    },
+  };
+  return map[blokNedeni] ?? {
+    ozet: 'Bu blokaj türü için genel çözüm önerileri aşağıda listelenmiştir.',
+    oneriler: [
+      { baslik: 'Kök Neden Analizi', aciklama: 'Blokajın temel nedenini ekip ile birlikte tespit et.' },
+      { baslik: 'Eskalasyon Değerlendirmesi', aciklama: 'Gerekiyorsa yöneticiye durumu ilet, destek al.' },
+      { baslik: 'Plan Revizyonu', aciklama: 'Sprint planını gerçek duruma göre güncelle.' },
+    ],
+  };
+}
+
+export async function suggestBlokCozum(blokNedeni: string, taskNo: string): Promise<BlokCozumResult> {
+  const prompt = `Sen bir Agile Coach'sun. Bir Scrum ekibinde "${taskNo}" numaralı task şu nedenle bloklanmış: "${blokNedeni}".
+
+Bu blokaj için somut, uygulanabilir çözüm önerileri üret. Türkçe yaz. Sadece JSON döndür:
+{
+  "ozet": "<blokajın neden önemli olduğu ve genel yaklaşım, 1-2 cümle>",
+  "oneriler": [
+    { "baslik": "<kısa eylem başlığı>", "aciklama": "<uygulanabilir açıklama, 1-2 cümle>" },
+    { "baslik": "...", "aciklama": "..." },
+    { "baslik": "...", "aciklama": "..." },
+    { "baslik": "...", "aciklama": "..." }
+  ]
+}`;
+
+  try {
+    const text = await askGemini(prompt);
+    return extractJson<BlokCozumResult>(text);
+  } catch {
+    return mockBlokCozum(blokNedeni);
+  }
+}
 
 export async function chaosToClarity(
   rawText: string,
